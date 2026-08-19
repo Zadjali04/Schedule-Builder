@@ -1,0 +1,2149 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr" data-theme="dark" id="htmlRoot">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<meta name="referrer" content="no-referrer">
+<!-- Content-Security-Policy: everything runs locally; the only third parties are the
+     pdf.js library (cdnjs) and Google Fonts. No endpoint can receive your data.
+     Nothing here needs changing. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net blob:; worker-src 'self' blob: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<title>Schedule Builder</title>
+<!-- ============================================================================
+     Browser gate. This is the FIRST script on the page and the only place the two
+     third-party resources (Google Fonts, pdf.js) are referenced, so on Safari the
+     page makes zero external requests and the app never initialises.
+     ============================================================================ -->
+<script>
+(function(){
+  var ua = navigator.userAgent || '';
+  var vendor = navigator.vendor || '';
+  /* Every iOS browser is WebKit and every one of them says "Safari/" — the token
+     list below is what separates real Safari from Chrome/Edge/Firefox/Opera. */
+  var notSafari = /(CriOS|FxiOS|EdgiOS|OPiOS|OPR\/|Edg\/|Chrome\/|Chromium|Android|SamsungBrowser|DuckDuckGo|Brave|YaBrowser|HeadlessChrome)/i.test(ua);
+  var isSafari = !notSafari && /Safari\//.test(ua) && /Apple/i.test(vendor);
+
+  if(isSafari){
+    window.__SAFARI_BLOCKED = true;
+    document.title = 'Safari is not supported';
+    var paint = function(){
+      document.documentElement.setAttribute('data-theme','light');
+      var body = document.body;
+      while(body.firstChild) body.removeChild(body.firstChild);
+      body.setAttribute('style','margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#FAF5F6;color:#2D142C;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;line-height:1.7;-webkit-text-size-adjust:100%;');
+      var card = document.createElement('main');
+      card.setAttribute('style','max-width:520px;width:100%;background:#fff;border:1px solid #EBDDE1;border-radius:12px;padding:28px 26px;text-align:center;');
+      var mark = document.createElement('div');
+      mark.setAttribute('style','width:44px;height:44px;margin:0 auto 16px;border-radius:12px;background:#C72C41;color:#fff;font-size:24px;line-height:44px;font-weight:700;');
+      mark.textContent = '!';
+      var h = document.createElement('h1');
+      h.setAttribute('style','margin:0 0 10px;font-size:21px;');
+      h.textContent = 'Apple Safari is not supported';
+      var p1 = document.createElement('p');
+      p1.setAttribute('style','margin:0 0 6px;font-size:14.5px;color:#5C4652;');
+      p1.textContent = 'This tool works best on Google Chrome. Please open this page in Chrome and try again.';
+      var h2 = document.createElement('h2');
+      h2.setAttribute('style','margin:22px 0 8px;font-size:19px;direction:rtl;');
+      h2.textContent = 'متصفح سفاري غير مدعوم';
+      var p2 = document.createElement('p');
+      p2.setAttribute('style','margin:0;font-size:14.5px;color:#5C4652;direction:rtl;');
+      p2.textContent = 'تعمل هذه الأداة بأفضل صورة على متصفح Google Chrome. يُرجى فتح الصفحة من كروم والمحاولة مرة أخرى.';
+      var foot = document.createElement('p');
+      foot.setAttribute('style','margin:22px 0 0;padding-top:16px;border-top:1px solid #EBDDE1;font-size:12px;color:#7C606C;');
+      foot.textContent = 'Schedule Builder — built by WALEED AL-ZADJALI';
+      card.appendChild(mark); card.appendChild(h); card.appendChild(p1);
+      card.appendChild(h2); card.appendChild(p2); card.appendChild(foot);
+      body.appendChild(card);
+    };
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', paint);
+    else paint();
+    return;
+  }
+
+  /* --- supported browser: pull in the fonts --- */
+  [['preconnect','https://fonts.googleapis.com',false],
+   ['preconnect','https://fonts.gstatic.com',true],
+   ['stylesheet','https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap',false]
+  ].forEach(function(it){
+    var l = document.createElement('link');
+    l.rel = it[0]; l.href = it[1];
+    if(it[2]) l.crossOrigin = 'anonymous';
+    document.head.appendChild(l);
+  });
+
+  /* --- and pdf.js -------------------------------------------------------
+     v6 is ESM only: there is no UMD bundle and no automatic `pdfjsLib` global
+     any more, so it is pulled in with a dynamic import() and published onto
+     window afterwards. Anything from 4.2.67 up carries the CVE-2024-4367 fix.
+
+     Nothing to set up: it loads from cdnjs and that is fine.
+     Optional hardening, both entirely skippable:
+       - paste the sha512 from the cdnjs page into PDFJS_SRI below, or
+       - drop pdf.min.mjs + pdf.worker.min.mjs into vendor/pdfjs/ and set
+         PDFJS_LOCAL = './vendor/pdfjs/' (then cdnjs is only a fallback).
+     --------------------------------------------------------------------- */
+  /* iOS ships one engine for every browser, and Promise.withResolvers only landed in
+     Safari 17.4 — pdf.js v6 needs it, so on older iPhones the library died on load
+     no matter which browser was used. Polyfill it, then prefer the LEGACY build,
+     which Mozilla publishes specifically for engines without the newest syntax. */
+  if(typeof Promise.withResolvers !== 'function'){
+    Promise.withResolvers = function(){
+      var resolve, reject;
+      var promise = new Promise(function(res, rej){ resolve = res; reject = rej; });
+      return { promise: promise, resolve: resolve, reject: reject };
+    };
+  }
+  if(!Object.hasOwn){ Object.hasOwn = function(o, k){ return Object.prototype.hasOwnProperty.call(o, k); }; }
+  if(!Array.prototype.at){
+    Object.defineProperty(Array.prototype, 'at', { value:function(n){ n=Math.trunc(n)||0; if(n<0) n+=this.length; return (n<0||n>=this.length)? undefined : this[n]; }, writable:true, configurable:true });
+  }
+
+  /* Sources are tried in order until one both loads AND successfully parses a file.
+     Older iPhones fail at RUNTIME inside the newest builds (minified errors like
+     "undefined is not a function (near '...t of e...')" = syntax the engine lacks),
+     so a load-time check alone is not enough — see extractPdfWords(). v4 legacy is
+     first: it is transpiled for older engines and is past CVE-2024-4367. */
+  var PDFJS_SOURCES = [
+    'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/',
+    'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/',
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.2.108/'
+  ];
+  window.__PDFJS_SOURCES = PDFJS_SOURCES;
+
+  function loadPdfjs(base){
+    var url = new URL(base + 'pdf.min.mjs', document.baseURI).href;
+    return import(url).then(function(m){
+      if(!m || typeof m.getDocument !== 'function') throw new Error('pdfjs-load-failed');
+      m.GlobalWorkerOptions.workerSrc = new URL(base + 'pdf.worker.min.mjs', document.baseURI).href;
+      window.pdfjsLib = m;
+      return m;
+    });
+  }
+
+  var cache = {};
+  window.__pdfjsLoad = function(i){
+    if(i >= PDFJS_SOURCES.length) return Promise.reject(new Error('pdfjs-load-failed'));
+    if(!cache[i]) cache[i] = loadPdfjs(PDFJS_SOURCES[i]);
+    return cache[i];
+  };
+  window.__pdfjsReady = window.__pdfjsLoad(0);
+  /* keep the rejection for whoever awaits it, but don't log an unhandled one */
+  window.__pdfjsReady.catch(function(){});
+})();
+</script>
+<style>
+  /* =========================================================================
+     One palette, two modes. #EE4540 #C72C41 #801336 #510A32 #2D142C runs through
+     both: it is the ink and the accent on light, the surfaces and the accent on
+     dark. Course colours are the same ten hues in both modes — pastel on light,
+     neon on dark — and both carry dark ink, so a block reads the same either way.
+     ========================================================================= */
+  :root, html[data-theme="light"]{
+    --bg:#FAF5F6;
+    --panel:#FFFFFF;
+    --surface:#FBF7F8;      /* insets: dropzone, cards, toggles */
+    --field:#FFFFFF;        /* inputs, selects, icon buttons */
+    --pill:#F5EDEF;
+    --line:#EBDDE1;
+    --text:#2D142C;         /* the palette's darkest, used as ink */
+    --muted:#7C606C;
+    --accent:#B31E3B;       /* #C72C41 deepened for small text on white */
+    --accent-fill:#C72C41;
+    --accent-soft:#C72C4114;
+    --on-accent:#FFFFFF;
+    --flag-bg:#FDF1E3;
+    --flag-border:#E08A3C;
+    --flag-text:#8A4A12;
+    --good:#0F7A5A;
+    --good-soft:#0F7A5A14;
+    --good-border:#0F7A5A55;
+    --danger-bg:#FCE9EC;
+    --danger-border:#F2C6CE;
+    --danger-line:#C72C41;
+    --danger-text:#801336;
+    --danger-tint:#FDF4F5;
+    --sess-text:#2D142C;
+    --radius:12px;
+    --c0:#7BA7D0; --c1:#F5A94F; --c2:#7CBE72; --c3:#EC8082; --c4:#C99BBD;
+    --c5:#F2D96C; --c6:#FFB4BC; --c7:#95CFCA; --c8:#BE9781; --c9:#BCD97A;
+  }
+  html[data-theme="dark"]{
+    --bg:#130912;
+    --panel:#22101F;
+    --surface:#2D142C;
+    --field:#381935;
+    --pill:#381935;
+    --line:#4A2239;
+    --text:#F7E9EE;
+    --muted:#BE9AAA;
+    --accent:#FF6B60;       /* #EE4540 lifted for small text on plum */
+    --accent-fill:#EE4540;
+    --accent-soft:#EE454033;
+    --on-accent:#2D142C;
+    --flag-bg:#80133666;
+    --flag-border:#C72C41;
+    --flag-text:#FFC9B6;
+    --good:#3DFFB0;
+    --good-soft:#3DFFB01F;
+    --good-border:#3DFFB059;
+    --danger-bg:#C72C4133;
+    --danger-border:#C72C4180;
+    --danger-line:#EE4540;
+    --danger-text:#FF9E9B;
+    --danger-tint:#510A3240;
+    --sess-text:#1A0B18;
+    --c0:#00E5FF; --c1:#FFA62B; --c2:#3DFF8B; --c3:#FF3B5C; --c4:#C77DFF;
+    --c5:#FFD60A; --c6:#FF61D2; --c7:#2CE8D5; --c8:#FF7A45; --c9:#B5FF3D;
+  }
+  html[data-theme="dark"] .sess{font-weight:700;}
+  html[data-theme="dark"] .badge{font-weight:700;}
+  html[data-theme="dark"] .legend .sw,
+  html[data-theme="dark"] .rrow .sw,
+  html[data-theme="dark"] .course-row .sw,
+  html[data-theme="dark"] .instr-course .sw{box-shadow:0 0 6px currentColor;}
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans Arabic', sans-serif;
+    line-height:1.6;
+    -webkit-text-size-adjust:100%;
+  }
+  .page{max-width:1180px;margin:0 auto;padding:22px 18px 70px;}
+
+  header.top{
+    display:flex; justify-content:space-between; align-items:flex-start;
+    flex-wrap:wrap; gap:14px; margin-bottom:22px;
+    padding-bottom:18px; border-bottom:1px solid var(--line);
+  }
+  .top h1{font-size:22px; margin:0 0 4px;}
+  .top p{color:var(--muted); font-size:13.5px; margin:0;}
+  .top-actions{display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+  .btn{
+    font-family:inherit; font-size:13px; cursor:pointer;
+    border-radius:999px; padding:8px 16px; border:1px solid var(--line);
+    background:var(--panel); color:var(--text); min-height:36px;
+  }
+  .btn:hover{border-color:var(--accent); color:var(--accent);}
+  .btn.primary{background:var(--accent-fill); color:var(--on-accent); border-color:var(--accent-fill);}
+  .btn.primary:hover{opacity:.92; color:var(--on-accent);}
+  .btn.small{padding:5px 12px; font-size:12px; min-height:30px;}
+  .btn:focus-visible, .icon-btn:focus-visible, .sec-chip:focus-visible,
+  .day-chip:focus-visible, select:focus-visible, input:focus-visible{
+    outline:2px solid var(--accent); outline-offset:2px;
+  }
+
+  section.block{
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:var(--radius); padding:20px 22px; margin-bottom:18px;
+  }
+  h2.section-title{font-size:16px; margin:0 0 14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  h2.section-title .n{
+    width:22px; height:22px; border-radius:6px; background:var(--accent-soft);
+    color:var(--accent); font-family:'IBM Plex Mono',monospace; font-size:12px;
+    display:flex; align-items:center; justify-content:center; flex:none;
+  }
+
+  /* upload */
+  .dropzone{
+    border:2px dashed var(--line); border-radius:var(--radius);
+    padding:36px 20px; text-align:center; cursor:pointer;
+    transition:.15s; background:var(--surface);
+  }
+  .dropzone:hover, .dropzone.drag{border-color:var(--accent); background:var(--accent-soft);}
+  .dropzone .icon{font-size:30px; margin-bottom:8px;}
+  .dropzone .main{font-size:14.5px; margin-bottom:4px;}
+  .dropzone .sub{font-size:12.5px; color:var(--muted);}
+  input[type=file]{display:none;}
+  .status-row{display:flex; align-items:center; gap:10px; margin-top:14px; font-size:13px; color:var(--muted);}
+  .spinner{
+    width:16px;height:16px;border-radius:50%;
+    border:2px solid var(--line); border-top-color:var(--accent);
+    animation:spin 0.8s linear infinite; flex:none;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .error-box{
+    margin-top:14px; padding:12px 14px; border-radius:10px;
+    background:var(--danger-bg); color:var(--danger-text); font-size:13.5px; border:1px solid var(--danger-border);
+  }
+  .info-box{
+    margin-top:14px; padding:10px 13px; border-radius:10px;
+    background:var(--flag-bg); color:var(--flag-text); border:1px solid var(--flag-border); font-size:12.5px;
+  }
+
+  /* meta banner */
+  .meta-grid{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:10px 18px; font-size:13px;
+  }
+  .meta-grid .k{color:var(--muted); font-size:11.5px;}
+  .meta-grid .v{font-weight:600; unicode-bidi:isolate;}
+
+  /* review rows */
+  .review-hint{font-size:13px; color:var(--muted); margin-bottom:14px;}
+  .flagged-count{
+    display:inline-flex; align-items:center; gap:6px;
+    background:var(--flag-bg); color:var(--flag-text); border:1px solid var(--flag-border);
+    border-radius:999px; padding:3px 10px; font-size:12px; margin-inline-start:6px;
+  }
+  .rrow{
+    display:grid; grid-template-columns: 20px 1.4fr 1.6fr 1.2fr; gap:12px;
+    align-items:center; padding:9px 0; border-bottom:1px dashed var(--line); font-size:13px;
+  }
+  .rrow:last-child{border-bottom:none;}
+  .rrow .sw{width:9px;height:9px;border-radius:3px;}
+  .rrow .course{unicode-bidi:isolate;}
+  .rrow .course code{font-family:'IBM Plex Mono',monospace; color:var(--accent); direction:ltr; display:inline-block;}
+  .rrow .sched{color:var(--muted); font-size:12px; unicode-bidi:isolate;}
+  .rrow input.instr{
+    width:100%; font-family:'IBM Plex Sans Arabic',sans-serif; direction:ltr; text-align:start;
+    border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:13px;
+    background:var(--field); color:var(--text);
+  }
+  .rrow input.instr.flag{background:var(--flag-bg); border-color:var(--flag-border);}
+  .rrow input.instr:focus{outline:none; border-color:var(--accent);}
+
+  /* course config */
+  .course-card{border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:10px; background:var(--surface);}
+  /* Every cell is placed explicitly. With auto-placement the two icon buttons were
+     landing on a third row once the section <select> spanned the full width. */
+  .course-row{
+    display:grid; grid-template-columns: 22px minmax(0,1.6fr) minmax(0,1fr) auto; gap:10px; align-items:center;
+  }
+  .course-row > .incl{grid-area:1 / 1;}
+  .course-row > .name{grid-area:1 / 2;}
+  .course-row > select.lock{grid-area:1 / 3;}
+  .course-row > .row-actions{grid-area:1 / 4;}
+  .row-actions{display:flex; gap:12px; flex:none;}
+  .course-row .name{font-size:14px; display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap;}
+  .course-row .name .sw{flex:none;}
+  .code-input, .name-input{
+    font-family:'IBM Plex Sans Arabic',sans-serif; border:1px solid var(--line); border-radius:8px;
+    padding:6px 9px; font-size:13px; background:var(--field); color:var(--text); min-width:0;
+  }
+  .code-input{width:110px; font-family:'IBM Plex Mono',monospace; direction:ltr;}
+  .name-input{flex:1 1 120px; min-width:0;}
+  select, .course-row input[type=checkbox]{accent-color:var(--accent);}
+  select{
+    font-family:'IBM Plex Sans Arabic',sans-serif; background:var(--field); color:var(--text);
+    border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:13px; width:100%;
+    min-width:0; max-width:100%;
+  }
+  .icon-btn{
+    font-family:inherit; cursor:pointer; border:1px solid var(--line); background:var(--field);
+    color:var(--text); border-radius:8px; width:34px; height:34px; font-size:14px; line-height:1; flex:none;
+  }
+  .icon-btn:hover{border-color:var(--accent);}
+  .dup-warning{
+    margin-top:10px; padding:9px 12px; border-radius:8px; background:var(--danger-bg); color:var(--danger-text);
+    border:1px solid var(--danger-border); font-size:12.5px;
+  }
+  .sec-chips-row{display:flex; align-items:center; gap:8px; margin-top:10px; flex-wrap:wrap;}
+  .sec-chips-label{font-size:12px; color:var(--muted); flex:none;}
+  .sec-chips{display:flex; flex-wrap:wrap; gap:6px;}
+  .sec-chip{
+    font-family:'IBM Plex Mono',monospace; font-size:12px; cursor:pointer;
+    padding:6px 11px; border-radius:7px; border:1px solid var(--line); background:var(--field); color:var(--text);
+  }
+  .sec-chip.excluded{background:var(--danger-bg); border-color:var(--danger-line); color:var(--danger-text); text-decoration:line-through;}
+  .sections-wrap{margin-top:12px; padding-top:12px; border-top:1px dashed var(--line); display:flex; flex-direction:column; gap:10px;}
+  .sec-editor{border:1px solid var(--line); border-radius:9px; padding:10px; background:var(--field);}
+  .sec-editor.dup{border-color:var(--danger-line); background:var(--danger-tint);}
+  .sec-editor-head{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;}
+  .sec-id-input{width:90px; font-family:'IBM Plex Mono',monospace; direction:ltr; text-align:center; border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:13px; background:var(--field); color:var(--text);}
+  .sec-instr-input{flex:1 1 140px; min-width:0; font-family:'IBM Plex Sans Arabic',sans-serif; direction:ltr; text-align:start; border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:13px; background:var(--field); color:var(--text);}
+  .sessions-editor{display:flex; flex-direction:column; gap:6px;}
+  .session-edit-row{display:flex; gap:6px; flex-wrap:wrap; align-items:center; border-radius:8px;}
+  .session-edit-row.bad{outline:1px solid var(--danger-line); outline-offset:2px; background:var(--danger-tint);}
+  .session-edit-row select{width:auto; min-width:92px; font-size:12.5px; padding:6px 8px;}
+  .session-edit-row input.room{width:90px; font-size:12.5px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--field); color:var(--text);}
+  .session-edit-row .icon-btn{width:30px; height:30px; font-size:12px;}
+
+  /* filters */
+  .filters-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:16px;}
+  .filter-item label{display:block; font-size:12.5px; color:var(--muted); margin-bottom:6px;}
+  .toggle-row{display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:10px 12px; height:100%;}
+  .toggle-row input{width:17px;height:17px; accent-color:var(--good); flex:none;}
+  .toggle-row span{font-size:13px;}
+  .days-toggle{display:flex; flex-wrap:wrap; gap:6px;}
+  .day-chip{
+    font-family:inherit; font-size:12.5px; cursor:pointer;
+    padding:8px 12px; border-radius:8px; border:1px solid var(--line);
+    background:var(--surface); color:var(--text);
+  }
+  .day-chip.active{background:var(--danger-bg); border-color:var(--danger-line); color:var(--danger-text);}
+
+  .filter-item.wide{grid-column:1 / -1;}
+  .block-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .block-row span{font-size:12.5px; color:var(--muted); flex:none;}
+  .block-row select{flex:1 1 170px; min-width:150px; width:auto;}
+  .hint{font-size:11.5px; color:var(--muted); margin-top:7px; line-height:1.5;}
+
+  .instr-group{display:flex; flex-direction:column; gap:2px; max-height:290px; overflow-y:auto;}
+  .instr-row{
+    display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap;
+    padding:8px 0; border-bottom:1px dashed var(--line);
+  }
+  .instr-row:last-child{border-bottom:none;}
+  .instr-course{display:flex; align-items:center; gap:6px; flex:0 0 110px; font-size:12px; padding-top:5px;}
+  .instr-course code{font-family:'IBM Plex Mono',monospace; color:var(--accent); direction:ltr;}
+  .instr-course .sw{width:9px; height:9px; border-radius:3px; flex:none;}
+  .instr-chips{display:flex; flex-wrap:wrap; gap:6px; flex:1 1 220px; min-width:0;}
+  .instr-chip{
+    font-family:inherit; font-size:12.5px; cursor:pointer; max-width:100%;
+    padding:7px 11px; border-radius:8px; border:1px solid var(--line);
+    background:var(--surface); color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    direction:ltr;
+  }
+  .instr-chip.only{background:var(--good-soft); border-color:var(--good-border); color:var(--good); font-weight:600;}
+  .instr-chip.avoid{background:var(--danger-bg); border-color:var(--danger-line); color:var(--danger-text); text-decoration:line-through;}
+  .why-box{
+    margin:16px auto 0; max-width:520px; text-align:start;
+    background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    padding:12px 14px; font-size:12.5px; color:var(--text);
+  }
+  .why-box .why-title{font-weight:600; margin-bottom:6px;}
+  .why-box ul{margin:0; padding-inline-start:18px;}
+  .why-box li{margin-bottom:3px; unicode-bidi:isolate;}
+
+  .summary-bar{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; font-size:13.5px; color:var(--muted); margin-bottom:16px;}
+  .summary-bar .grow{flex:1 1 220px;}
+  .summary-bar b{color:var(--accent); font-family:'IBM Plex Mono',monospace;}
+
+  .results{display:grid; grid-template-columns:repeat(auto-fit, minmax(min(380px,100%),1fr)); gap:18px;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px;}
+  .card-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; flex-wrap:wrap;}
+  .badge{font-family:'IBM Plex Mono',monospace; background:var(--accent-fill); color:var(--on-accent); font-size:12px; font-weight:600; border-radius:7px; padding:4px 9px;}
+  .metrics{display:flex; flex-wrap:wrap; gap:6px; align-items:center;}
+  .pill{font-size:11px; color:var(--text); background:var(--pill); border:1px solid var(--line); border-radius:999px; padding:4px 9px; font-family:'IBM Plex Mono',monospace;}
+  .pill.good{color:var(--good); background:var(--good-soft); border-color:var(--good-border);}
+  /* the clock range mixes digits, latin AM/PM and an arrow: isolate it so RTL
+     never reorders it into "AM -> 6:30 PM 8:00" */
+  .pill.range{direction:ltr; unicode-bidi:isolate; text-align:center;}
+  .card-pdf{font-size:11px; padding:4px 10px; min-height:26px;}
+
+  /* ---- mini timetable grid ---- */
+  .grid-wrap{
+    direction:ltr; margin-top:12px; border:1px solid var(--line); border-radius:10px;
+    background:var(--surface); padding:12px 10px 14px; overflow-x:auto;
+  }
+  .mgrid{min-width:330px;}
+  .mg-head{display:flex;}
+  .mg-gutter{width:54px; flex:none;}
+  .mg-day{flex:1 1 0; min-width:46px; text-align:center; font-size:10.5px; color:var(--muted); padding-bottom:6px; white-space:nowrap;}
+  .mg-body{display:flex; height:var(--bodyh);}
+  .mg-axis{position:relative;}
+  .mg-tick{
+    position:absolute; right:7px; transform:translateY(-50%);
+    font-family:'IBM Plex Mono',monospace; font-size:9.5px; font-weight:600;
+    color:var(--muted); white-space:nowrap;
+  }
+  .mg-col{
+    flex:1 1 0; min-width:46px; position:relative;
+    border-left:1px solid var(--line); border-bottom:1px solid var(--line);
+    background-image:repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px calc(var(--rowh) * 2));
+  }
+  .mg-col:last-child{border-right:1px solid var(--line);}
+  .sess{
+    position:absolute; left:2px; right:2px; border-radius:5px; padding:2px 4px;
+    overflow:hidden; color:var(--sess-text); font-weight:600; line-height:1.25;
+    font-family:'IBM Plex Sans Arabic',sans-serif; font-size:9.3px;
+  }
+  .sess .t{display:block; font-family:'IBM Plex Mono',monospace; font-weight:500; font-size:8.6px; opacity:.92;}
+  .sess .r{display:block; font-family:'IBM Plex Mono',monospace; font-weight:500; font-size:8.2px; opacity:.8;}
+
+  .legend{margin-top:12px; font-size:12.5px; display:flex; flex-direction:column; gap:5px;}
+  .legend .row{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .legend .sw{width:9px;height:9px;border-radius:3px;flex:none;}
+  .legend .code{font-family:'IBM Plex Mono',monospace; color:var(--accent); direction:ltr; unicode-bidi:isolate;}
+  .legend .rest{color:var(--muted); unicode-bidi:isolate;}
+  .legend .who{unicode-bidi:isolate;}
+
+  .empty-state{text-align:center; padding:44px 20px; color:var(--muted);}
+  .empty-state .big{font-size:17px; color:var(--text); margin-bottom:6px; font-weight:600;}
+  .loadmore-wrap{text-align:center; margin-top:22px;}
+  #loadmoreBtn{font-family:inherit; background:var(--good-soft); color:var(--good); border:1px solid var(--good-border); padding:10px 22px; border-radius:999px; font-size:13.5px; cursor:pointer;}
+  input::placeholder{color:var(--muted); opacity:.75;}
+
+  footer.note{margin-top:28px; font-size:12px; color:var(--muted); text-align:center; border-top:1px solid var(--line); padding-top:14px;}
+  footer.note .line{margin-bottom:6px;}
+  footer.note a{color:var(--accent); text-decoration:none;}
+  footer.note a:hover{text-decoration:underline;}
+  footer.note .disclaimer{font-size:11.5px; opacity:.85; max-width:640px; margin:8px auto 0;}
+  .hidden{display:none !important;}
+
+  /* ---- responsive ---- */
+  @media (max-width:760px){
+    .page{padding:16px 12px 56px;}
+    section.block{padding:16px 14px;}
+    .top h1{font-size:19px;}
+    .rrow{grid-template-columns:20px 1fr; gap:6px 10px; padding:12px 0;}
+    .rrow .sched{grid-column:2;}
+    .rrow input.instr{grid-column:2;}
+    /* phone: code + name share one line, then the dropdown, then the buttons */
+    .course-row{grid-template-columns:22px minmax(0,1fr); row-gap:12px;}
+    .course-row > select.lock{grid-area:2 / 1 / 2 / -1;}
+    .course-row > .row-actions{grid-area:3 / 1 / 3 / -1; justify-content:flex-end;}
+    .course-row .name{flex-wrap:nowrap;}
+    .code-input{width:92px; flex:0 0 92px;}
+    .name-input{flex:1 1 auto; min-width:0;}
+    .row-actions .icon-btn{width:44px; height:38px;}
+    .filters-grid{grid-template-columns:1fr;}
+    .instr-course{flex:0 0 100%; padding-top:0;}
+    .instr-chips{flex:1 1 100%;}
+    .block-row select{flex:1 1 100%; min-width:0;}
+    .card{padding:12px;}
+    .metrics{gap:5px;}
+    .pill{font-size:10.5px; padding:3px 8px;}
+  }
+  @media (max-width:420px){
+    .top-actions{width:100%;}
+    .btn{font-size:12.5px;}
+    .mg-gutter{width:46px;}
+    .mg-day{min-width:40px; font-size:10px;}
+    .mg-col{min-width:40px;}
+    .mgrid{min-width:286px;}
+    .why-box{padding:10px 12px;}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:.001ms !important; transition-duration:.001ms !important;}
+  }
+
+  /* ---- print (Ctrl+P -> Save as PDF keeps Arabic exactly as on screen) ---- */
+  @media print{
+    @page{size:A4 landscape; margin:10mm;}
+    /* never print the dark theme — paper is white and neon costs ink */
+    html[data-theme="dark"]{
+      --bg:#ffffff; --panel:#ffffff; --surface:#ffffff; --field:#ffffff; --pill:#F5EDEF;
+      --line:#E0D2D7; --text:#2D142C; --muted:#6B505C;
+      --accent:#B31E3B; --accent-fill:#C72C41; --on-accent:#ffffff;
+      --good:#0F7A5A; --good-border:#0F7A5A55; --sess-text:#2D142C;
+      --flag-bg:#FDF1E3; --flag-border:#E08A3C; --flag-text:#8A4A12;
+      --danger-bg:#FCE9EC; --danger-border:#F2C6CE; --danger-line:#C72C41; --danger-text:#801336;
+      --c0:#7BA7D0; --c1:#F5A94F; --c2:#7CBE72; --c3:#EC8082; --c4:#C99BBD;
+      --c5:#F2D96C; --c6:#FFB4BC; --c7:#95CFCA; --c8:#BE9781; --c9:#BCD97A;
+    }
+    html[data-theme="dark"] .sess{font-weight:600;}
+    html[data-theme="dark"] .legend .sw, html[data-theme="dark"] .rrow .sw,
+    html[data-theme="dark"] .course-row .sw, html[data-theme="dark"] .instr-course .sw{box-shadow:none;}
+    body{background:#ffffff;}
+    header.top, .dropzone-wrap, #metaBlock, #reviewBlock, #courseBlock, #filterBlock,
+    .summary-bar, .loadmore-wrap, .card-pdf, footer.note .no-print{display:none !important;}
+    .page{max-width:none; padding:0;}
+    .results{grid-template-columns:1fr; gap:10px;}
+    .card{break-inside:avoid; page-break-inside:avoid; border:1px solid #ccc;}
+    .sess,.badge,.pill,.legend .sw{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  }
+</style>
+</head>
+<body>
+<noscript>
+  <div style="max-width:520px;margin:40px auto;padding:20px 22px;border:1px solid var(--line);border-radius:12px;background:var(--panel);text-align:center;">
+    <strong>JavaScript is required</strong>
+    <p style="margin:8px 0 0;font-size:14px;color:var(--muted);">This tool reads your PDF inside the browser, so it cannot work with scripts disabled.</p>
+    <p style="margin:8px 0 0;font-size:14px;color:var(--muted);direction:rtl;">تحتاج هذه الأداة إلى تفعيل JavaScript لأنها تقرأ ملف الـ PDF داخل متصفحك.</p>
+  </div>
+</noscript>
+<div class="page">
+
+  <header class="top">
+    <div>
+      <h1 id="hTitle">Schedule Builder</h1>
+      <p id="hSub">ارفع ملف PDF مباشرة من نظام CIMS</p>
+    </div>
+    <div class="top-actions">
+      <button class="btn" id="themeBtn" type="button" aria-pressed="true"></button>
+      <button class="btn" id="langBtn" type="button">العربية</button>
+    </div>
+  </header>
+
+  <section class="block dropzone-wrap" id="uploadBlock">
+    <h2 class="section-title"><span class="n">1</span><span id="uTitle">رفع الجدول</span></h2>
+    <div class="dropzone" id="dropzone" tabindex="0" role="button">
+      <div class="icon">📄</div>
+      <div class="main" id="dzMain">اسحب ملف PDF هنا أو اضغط للاختيار</div>
+      <div class="sub" id="dzSub">يدعم تنسيق جدول College Time Table الرسمي (متعدد الصفحات)</div>
+      <input type="file" id="fileInput" accept="application/pdf,.pdf">
+    </div>
+    <div class="status-row hidden" id="statusRow">
+      <div class="spinner"></div><span id="statusText">...</span>
+    </div>
+    <div class="error-box hidden" id="errorBox"></div>
+    <div class="info-box hidden" id="noticeBox"></div>
+  </section>
+
+  <section class="block hidden" id="metaBlock">
+    <div class="meta-grid" id="metaGrid"></div>
+  </section>
+
+  <section class="block hidden" id="reviewBlock">
+    <h2 class="section-title"><span class="n">2</span><span id="rTitle">التحقّق من أسماء المحاضرين</span><button class="btn small" type="button" id="reviewToggleBtn" style="margin-inline-start:auto;"></button></h2>
+    <div id="reviewContent">
+      <p class="review-hint" id="rHint">تم استخراج الأوقات والقاعات بدقة تامة من ملف الـ PDF، أمّا أسماء بعض المحاضرين فقد تتقطّع بسبب التفاف النص داخل الخلايا الضيقة؛ يُرجى مراجعة الحقول المظلّلة وتصحيحها عند اللزوم.<span class="flagged-count" id="flagCount"></span></p>
+      <div id="reviewRows"></div>
+    </div>
+  </section>
+
+  <section class="block hidden" id="courseBlock">
+    <h2 class="section-title"><span class="n">3</span><span id="cTitle">المقررات والشُعب</span></h2>
+    <div id="courseRows"></div>
+  </section>
+
+  <section class="block hidden" id="filterBlock">
+    <h2 class="section-title"><span class="n">4</span><span id="fTitle">شروط الجدول</span><button class="btn small" type="button" id="resetFiltersBtn" style="margin-inline-start:auto;">إعادة ضبط الشروط</button></h2>
+    <div class="filters-grid">
+      <div class="filter-item">
+        <label id="lblMinStart" for="minStart">لا تبدأ المحاضرات قبل الساعة</label>
+        <select id="minStart"></select>
+      </div>
+      <div class="filter-item">
+        <label id="lblMaxEnd" for="maxEnd">لا تنتهي المحاضرات بعد الساعة</label>
+        <select id="maxEnd"></select>
+      </div>
+      <div class="filter-item">
+        <label id="lblSort" for="sortMode">ترتيب النتائج حسب</label>
+        <select id="sortMode">
+          <option value="compact" id="optCompact">الأكثر تراصًّا (أقل فراغات)</option>
+          <option value="days" id="optDays">أقل عدد أيام حضور</option>
+          <option value="early" id="optEarly">الأبكر بداية</option>
+        </select>
+      </div>
+      <div class="filter-item">
+        <div class="toggle-row">
+          <input type="checkbox" id="noGaps">
+          <span id="lblNoGaps"><label for="noGaps">بدون أي فراغ بين المحاضرات (تراص تام)</label></span>
+        </div>
+      </div>
+      <div class="filter-item">
+        <label id="lblDaysOff">الأيام التي تريد إبقاءها بلا محاضرات</label>
+        <div class="days-toggle" id="daysOffGroup"></div>
+      </div>
+      <div class="filter-item">
+        <label id="lblMaxDays" for="maxDays">الحد الأقصى لعدد أيام الحضور</label>
+        <select id="maxDays"></select>
+      </div>
+      <div class="filter-item wide">
+        <label id="lblBlock">أبقِ هذه الفترة فارغة كل يوم</label>
+        <div class="block-row">
+          <span id="blockFromLbl">من</span><select id="blockStart"></select>
+          <span id="blockToLbl">إلى</span><select id="blockEnd"></select>
+        </div>
+      </div>
+      <div class="filter-item wide">
+        <label id="lblInstr">تفضيلات المحاضرين</label>
+        <div class="instr-group" id="instrGroup"></div>
+        <div class="hint" id="instrHint"></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="hidden" id="resultsWrap">
+    <div class="summary-bar">
+      <div class="grow" id="summaryText">—</div>
+      <div id="showingText"></div>
+      <button class="btn small" type="button" id="exportAllBtn">تصدير المعروض PDF</button>
+    </div>
+    <div class="results" id="results"></div>
+    <div class="empty-state hidden" id="emptyState">
+      <div class="big" id="emptyBig">لا يوجد جدول يطابق هذه الشروط</div>
+      <div id="emptySub">حاول تخفيف شرط الوقت أو إلغاء خيار "بدون فراغات".</div>
+      <div class="why-box hidden" id="whyBox"></div>
+    </div>
+    <div class="loadmore-wrap hidden" id="loadmoreWrap">
+      <button id="loadmoreBtn" type="button">تحميل المزيد</button>
+    </div>
+  </div>
+
+  <footer class="note">
+    <div class="line" id="footNote">تتم عملية الاستخراج بالكامل داخل متصفحك — لا تُرفع بياناتك إلى أي خادم خارجي.</div>
+    <div class="line no-print" id="footCredits"></div>
+    <div class="disclaimer" id="footDisclaimer"></div>
+  </footer>
+</div>
+
+<script>
+/* The gate in <head> already replaced the page; stop this script dead so no
+   listener is bound and no state is created. */
+if(globalThis.__SAFARI_BLOCKED) throw new Error('unsupported-browser: Safari');
+
+/* =========================================================================
+   EDIT ME — credits shown in the footer
+   ========================================================================= */
+const CREDITS = {
+  name: 'WALEED AL-ZADJALI',
+  repo: 'https://github.com/zadjali04'   // <-- put the exact repo URL here
+};
+
+/* ================= I18N ================= */
+const T = {
+  ar: {
+    title:'منظم الجدول الدراسي', sub:'ارفع ملف PDF مباشرة من البوابة الالكترونية CIMS -- تقوم الأداة باستخراج المقررات والشعب تلقائيا',
+    lang:'English', themeDark:'الوضع الليلي', themeLight:'الوضع النهاري', uTitle:'رفع الجدول', dzMain:'اسحب ملف PDF هنا أو اضغط للاختيار',
+    dzSub:'يدعم تنسيق جدول College Time Table الرسمي (متعدد الصفحات)',
+    parsing:'جارٍ قراءة الملف وتحليل الجدول...', parseError:'لم أتمكّن من قراءة هذا الملف كجدول دراسي. يُرجى التأكّد من أنه بالتنسيق نفسه الصادر عن البوابة الإلكترونية الرسمية CIMS.',
+    notPdf:'الملف المختار ليس بصيغة PDF.', tooBig:'حجم الملف كبير جدًا (الحد الأقصى 25 ميجابايت).',
+    libError:'تعذّر تحميل مكتبة قراءة ملفات PDF. تحقّق من اتصالك بالإنترنت ثم أعد تحميل الصفحة.',
+    rTitle:'التحقّق من أسماء المحاضرين', rHint:'تم استخراج الأوقات والقاعات بدقة تامة من ملف الـ PDF، أمّا أسماء بعض المحاضرين فقد تتقطّع بسبب التفاف النص داخل الخلايا الضيقة؛ يُرجى مراجعة الحقول المظلّلة وتصحيحها عند اللزوم.',
+    flagged:(n)=> n+' حقل بحاجة إلى مراجعة سريعة', reviewHide:'إخفاء', reviewShow:'إظهار',
+    cTitle:'المقررات والشُعب', anySection:'أي شعبة', includeCol:'ضمن الجدول',
+    fTitle:'شروط الجدول', lblMinStart:'لا تبدأ المحاضرات قبل الساعة', lblMaxEnd:'لا تنتهي المحاضرات بعد الساعة',
+    lblSort:'ترتيب النتائج حسب', optCompact:'الأكثر تراصًّا (أقل فراغات)', optDays:'أقل عدد أيام حضور', optEarly:'الأبكر بداية',
+    lblNoGaps:'بدون أي فراغ بين المحاضرات (تراص تام)', noSelect:'بدون تحديد',
+    lblDaysOff:'الأيام التي تريد إبقاءها بلا محاضرات', lblMaxDays:'الحد الأقصى لعدد أيام الحضور',
+    maxDaysOpt:(n)=> n===1? 'يوم واحد فقط' : n+' أيام كحد أقصى',
+    addCourse:'+ إضافة مقرر جديد', addSection:'+ إضافة شعبة', addSession:'+ إضافة موعد محاضرة',
+    codePlaceholder:'رمز المقرر', namePlaceholder:'اسم المقرر',
+    sectionIdPlaceholder:'رقم الشعبة', roomPlaceholder:'القاعة', instrPlaceholder:'اسم المحاضر',
+    badTimeWarning:(ids)=> 'وقت غير صحيح في الشعبة: '+ids.join('، ')+' — يجب أن تكون نهاية المحاضرة بعد بدايتها. تم استبعاد هذه الشعبة حتى تُصحَّح.',
+    dupWarning:(ids)=> 'يوجد تكرار في رقم الشعبة: '+ids.join('، ')+'. الرجاء تعديل الأرقام حتى تكون كل شعبة برقم مختلف — تم استبعاد هذا المقرر من الجدول مؤقتًا.',
+    delCourseTooltip:'حذف المقرر', delSectionTooltip:'حذف الشعبة',
+    excludeLabel:'استبعاد شُعب:', allExcludedWarning:'كل شُعب هذا المقرر مستبعدة — لن يظهر هذا المقرر في أي جدول مقترح.',
+    noSectionsWarning:'هذا المقرر بلا شُعب — أضف شعبة واحدة على الأقل حتى يدخل في الحساب.',
+    summary:(v,f)=>`عدد الجداول الممكنة (بدون تعارض): ${v} — بعد تطبيق الشروط: ${f}`,
+    truncatedNote:(n)=>` (توقّف الحساب عند ${n} جدول — ثبّت شعبة أو استبعد بعض الشُعب لتقليل الاحتمالات)`,
+    skippedNote:(codes)=>` — تم تجاهل: ${codes.join('، ')} (بلا شُعب صالحة)`,
+    showing:(a,b)=>`يعرض ${a} من ${b}`, loadMore:'تحميل المزيد من الجداول',
+    emptyBig:'لا يوجد جدول يطابق هذه الشروط', emptySub:'حاول تخفيف شرط الوقت أو إلغاء خيار "بدون فراغات".',
+    optionEmpty:'اختر مقررًا واحدًا على الأقل', badge:(n)=>'الخيار '+String(n).padStart(2,'0'),
+    daysUsed:(n)=> n===1? 'يوم حضور واحد' : n+' أيام حضور', gapFree:'بدون فراغات', gapMin:(n)=>n+' د فراغ',
+    exportPdf:'PDF', exportAll:(n)=>`تصدير ${n} خيار PDF`, exportNote:'ملف PDF (الأسماء بالإنجليزية)',
+    exportCap:(n)=>`الحد الأقصى للتصدير دفعة واحدة ${n} خيار.`,
+    lblBlock:'أبقِ هذه الفترة فارغة كل يوم', blockFrom:'من', blockTo:'إلى',
+    lblInstr:'تفضيلات المحاضرين', instrNone:'لا توجد أسماء محاضرين بعد.',
+    instrHint:'التفضيل يخصّ كل مقرر على حدة — اضغط مرة: هذا المحاضر فقط · مرتين: تجنّبه · ثلاثًا: بدون تفضيل',
+    resetFilters:'إعادة ضبط الشروط',
+    whyTitle:'لماذا لا توجد نتائج؟',
+    whyClashIntro:'هذه المقررات لا يمكن الجمع بينها بأي شعبة:',
+    whyRelaxIntro:'الشروط التي تمنع ظهور النتائج:',
+    whyRelax:(label,n)=>`إلغاء «${label}» يعطي ${n} جدولًا.`,
+    whyDeeper:'التعارض ناتج عن اجتماع ثلاثة مقررات أو أكثر معًا — جرّب إلغاء تثبيت شعبة أو إرجاع شُعب مستبعدة.',
+    whyNoSections:'أحد المقررات بلا شُعب صالحة بعد تطبيق الاستبعاد أو تفضيلات المحاضرين.',
+    footNote:'تتم عملية الاستخراج بالكامل داخل متصفحك — لا تُرفع بياناتك إلى أي خادم خارجي.',
+    credits:'من إعداد',
+    disclaimer:'مشروع طلابي مستقل من إعداد شخصي بالكامل — ولا يمثّل خدمة رسمية. النتائج للاسترشاد فقط، وتبقى بوابة الجامعة هي المرجع الرسمي للتسجيل.',
+    multiLevel:'يحتوي الملف على أكثر من مستوى دراسي؛ تمّت إضافة اسم المستوى بجانب المقررات المكرّرة.',
+    metaAcademicYear:'العام الأكاديمي', metaLevel:'المستوى', metaDepartment:'القسم', metaSection:'الشعبة', metaSpecialization:'التخصص',
+    sec:'شعبة', instr:'المحاضر', days:{Sun:'الأحد',Mon:'الاثنين',Tue:'الثلاثاء',Wed:'الأربعاء',Thu:'الخميس',Fri:'الجمعة',Sat:'السبت'},
+    daySep:'، ',
+  },
+  en: {
+    title:'Schedule Builder', sub:'Upload the portals (CIMS) PDF — courses and sections are extracted automatically',
+    lang:'العربية', themeDark:'Dark', themeLight:'Light', uTitle:'Upload timetable', dzMain:'Drag a PDF here, or click to choose a file (Supports CIMS Docs)',
+    dzSub:'Supports the standard multi-page College Time Table format',
+    parsing:'Reading the file and parsing the table…', parseError:"Couldn't read this as a timetable — make sure it's the same format as the portal export.",
+    notPdf:'That file is not a PDF.', tooBig:'That file is too large (25 MB max).',
+    libError:'The PDF reading library could not be loaded. Check your connection and reload the page.',
+    rTitle:'Verify instructor names', rHint:"Times and rooms were extracted with 100% accuracy. A few instructor names may get broken by text-wrapping inside narrow PDF cells — check the highlighted fields and fix if needed.",
+    flagged:(n)=> n+' field(s) need a quick check', reviewHide:'Hide', reviewShow:'Show',
+    cTitle:'Courses & sections', anySection:'Any section', includeCol:'Include',
+    fTitle:'Schedule conditions', lblMinStart:"Don't start before", lblMaxEnd:"Don't end after",
+    lblSort:'Sort results by', optCompact:'Most compact (fewest gaps)', optDays:'Fewest days on campus', optEarly:'Earliest start',
+    lblNoGaps:'No gaps between classes at all', noSelect:'No preference',
+    lblDaysOff:'Days to keep free of classes', lblMaxDays:'Maximum days on campus',
+    maxDaysOpt:(n)=> n===1? '1 day only' : n+' days max',
+    addCourse:'+ Add new course', addSection:'+ Add section', addSession:'+ Add meeting time',
+    codePlaceholder:'Course code', namePlaceholder:'Course name',
+    sectionIdPlaceholder:'Section #', roomPlaceholder:'Room', instrPlaceholder:'Instructor name',
+    badTimeWarning:(ids)=> 'Invalid time in section: '+ids.join(', ')+' — the end time must be after the start time. This section is excluded until it is fixed.',
+    dupWarning:(ids)=> 'Duplicate section number: '+ids.join(', ')+'. Please make each section number unique — this course is temporarily excluded from the schedule.',
+    delCourseTooltip:'Delete course', delSectionTooltip:'Delete section',
+    excludeLabel:'Exclude sections:', allExcludedWarning:'All sections of this course are excluded — it will never appear in a generated schedule.',
+    noSectionsWarning:'This course has no sections yet — add at least one so it can be scheduled.',
+    summary:(v,f)=>`Conflict-free schedules: ${v} — matching your conditions: ${f}`,
+    truncatedNote:(n)=>` (stopped at ${n} schedules — lock a section or exclude a few to narrow it down)`,
+    skippedNote:(codes)=>` — skipped: ${codes.join(', ')} (no usable sections)`,
+    showing:(a,b)=>`Showing ${a} of ${b}`, loadMore:'Load more schedules',
+    emptyBig:'No schedule matches these conditions', emptySub:'Try relaxing the time window or turning off "no gaps".',
+    optionEmpty:'Select at least one course', badge:(n)=>'Option '+String(n).padStart(2,'0'),
+    daysUsed:(n)=> n===1? '1 day on campus' : n+' days on campus', gapFree:'No gaps', gapMin:(n)=>n+' min gap',
+    exportPdf:'PDF', exportAll:(n)=>`Export ${n} option(s) to PDF`, exportNote:'PDF file (labels in English)',
+    exportCap:(n)=>`Up to ${n} options can be exported at once.`,
+    lblBlock:'Keep this window free every day', blockFrom:'from', blockTo:'to',
+    lblInstr:'Instructor preferences', instrNone:'No instructor names yet.',
+    instrHint:'Preferences apply per course — click once: only this instructor · twice: avoid · three times: no preference',
+    resetFilters:'Reset conditions',
+    whyTitle:'Why are there no results?',
+    whyClashIntro:'These courses cannot be combined with any of their sections:',
+    whyRelaxIntro:'Conditions that are blocking the results:',
+    whyRelax:(label,n)=>`Turning off "${label}" gives ${n} schedule(s).`,
+    whyDeeper:'The clash comes from three or more courses together — try unlocking a section or bringing back an excluded one.',
+    whyNoSections:'One course has no usable sections left after exclusions or instructor preferences.',
+    footNote:"Parsing runs entirely in your browser — your file is never uploaded anywhere.",
+    credits:'Built by',
+    disclaimer:'An independent student project, built entirely on my own — not affiliated with, endorsed by, or an official service of any University. Results are for guidance only; the university portal remains the official reference for registration.',
+    multiLevel:'This file contains more than one academic level; the level is shown next to duplicated course codes.',
+    metaAcademicYear:'Academic Year', metaLevel:'Level', metaDepartment:'Department', metaSection:'Section', metaSpecialization:'Specialization',
+    sec:'Section', instr:'Instructor', days:{Sun:'Sun',Mon:'Mon',Tue:'Tue',Wed:'Wed',Thu:'Thu',Fri:'Fri',Sat:'Sat'},
+    daySep:', ',
+  }
+};
+
+const state = {
+  lang:'en', theme:'dark', courses:[], meta:{}, included:Object.create(null), locked:Object.create(null),
+  instrOverride:Object.create(null),
+  minStart:null, maxEnd:null, noGaps:false, sortMode:'compact', visible:12,
+  excludedDays:new Set(), maxDays:null, reviewOpen:false,
+  blockStart:null, blockEnd:null,
+  secPref:Object.create(null),   /* rowIdx -> 'only' | 'avoid', scoped per course by construction */
+  nextCourseUid:0, nextRowIdx:0, lastShown:[], notice:'',
+};
+
+function t(){ return T[state.lang]; }
+
+/* ================= SAFE HTML ================= */
+const ESC_MAP = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'};
+function esc(v){ return String(v==null?'':v).replace(/[&<>"'`]/g, ch=>ESC_MAP[ch]); }
+
+/* ================= TIME HELPERS ================= */
+function toMin(hhmm){ const [h,m]=String(hhmm).split(':').map(Number); return h*60+m; }
+function fmt(min){ const h=Math.floor(min/60), m=min%60; return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'); }
+function fmt12(min){
+  let h = Math.floor(min/60), m = min%60;
+  const ampm = h>=12 ? 'PM' : 'AM';
+  h = h%12; if(h===0) h=12;
+  return h+':'+String(m).padStart(2,'0')+' '+ampm;
+}
+function fmt12axis(min){
+  let h = Math.floor(min/60);
+  const ampm = h>=12 ? 'PM' : 'AM';
+  h = h%12; if(h===0) h=12;
+  return h+' '+ampm;
+}
+function fmt12str(hhmm){ return fmt12(toMin(hhmm)); }
+const DAY_ORDER = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const PALETTE = ['c0','c1','c2','c3','c4','c5','c6','c7','c8','c9'];
+/* The screen uses the --c0..--c9 custom properties so the neon set swaps in with the
+   dark theme. The PDF is printed on white paper, so it always uses this print-safe set. */
+const PDF_COLORS = ['#7BA7D0','#F5A94F','#7CBE72','#EC8082','#C99BBD','#F2D96C','#FFB4BC','#95CFCA','#BE9781','#BCD97A'];
+const PDF_INK = '#2D142C';
+
+/* ================= PDF PARSING ================= */
+const DAY_WORDS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+function dayCode(word){ return word.slice(0,3)[0].toUpperCase()+word.slice(1,3).toLowerCase(); }
+/* "Object- Oriented" is a line-wrap artefact, and so is "AL- BUSAIDI": in both cases the
+   hyphen belongs to the word, so drop the space that follows it. */
+function fixHyphen(s){ return String(s).replace(/([A-Za-z])-\s+([A-Za-z])/g, '$1-$2').replace(/\s{2,}/g,' ').trim(); }
+const SECTION_ID_RE = /^[0-9]{1,3}[A-Za-z]?$/;
+
+/* One attempt with one particular pdf.js build. */
+async function extractWith(lib, file){
+  const buf = await file.arrayBuffer();
+  const pdf = await lib.getDocument({
+    data:buf,
+    isEvalSupported:false,        /* mitigates CVE-2024-4367-style font/JS tricks */
+    disableAutoFetch:true,
+    disableStream:true,
+  }).promise;
+  const pages = [];
+  for(let p=1;p<=pdf.numPages;p++){
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({scale:1});
+    const content = await page.getTextContent();
+    const words = content.items.filter(it=>it.str && it.str.trim().length>0).map(it=>({
+      text: it.str.trim(), x0: it.transform[4], x1: it.transform[4]+it.width,
+      top: viewport.height - it.transform[5],
+    }));
+    pages.push({ width: viewport.width, height: viewport.height, words });
+  }
+  try{ await pdf.destroy(); }catch(e){}
+  return pages;
+}
+
+/* Walks the source list until one build parses the file. Older Safari/iOS engines
+   load the newest builds fine but then die inside them, so failing over on a parse
+   error is the only thing that actually helps those devices. */
+async function extractPdfWords(file){
+  const count = (globalThis.__PDFJS_SOURCES || [null]).length;
+  const load = (i)=> typeof globalThis.__pdfjsLoad === 'function'
+    ? globalThis.__pdfjsLoad(i)
+    : Promise.resolve(globalThis.pdfjsLib);
+  let loadedAny = false, lastErr = null;
+  for(let i=0; i<count; i++){
+    let lib;
+    try{ lib = await load(i); loadedAny = true; }
+    catch(e){ lastErr = e; continue; }
+    try{ return await extractWith(lib, file); }
+    catch(e){
+      lastErr = e;
+      console.warn('[schedule] pdf.js source', i, 'failed:', e && e.message);
+    }
+  }
+  throw loadedAny ? (lastErr || new Error('parse-failed')) : new Error('pdfjs-load-failed');
+}
+
+function parsePages(pages){
+  let currentCourse=null, currentRowId=null, nextRowId=0;
+  const rows = {}; const rowOrder = [];
+  let meta = {};
+  const levels = [];          /* {page, top, value} — a file can hold several tables */
+
+  pages.forEach((page, pidx)=>{
+    const pno = pidx+1;
+    const words = page.words.map(w=>({...w, page:pno}));
+
+    /* every "Level : X" block starts a new table region */
+    words.forEach((w,i)=>{
+      if(w.text.toLowerCase().replace(/[: ]/g,'')!=='level') return;
+      const sameLine = words.filter(x=>Math.abs(x.top-w.top)<3).sort((a,b)=>a.x0-b.x0);
+      const ci = sameLine.findIndex(x=>x.text.includes(':'));
+      const rest = ci>=0 ? sameLine.slice(ci+1) : sameLine.slice(1);
+      const val = rest.map(x=>x.text).join(' ').replace(/^:\s*/,'').trim();
+      if(val) levels.push({page:pno, top:w.top, value:val});
+    });
+
+    const dayWord = words.find(w=>DAY_WORDS.includes(w.text.toLowerCase()));
+    if(!dayWord) return;
+
+    if(pidx===0){
+      const grab = (label)=>{
+        const lw = words.find(w=>w.text.toLowerCase().startsWith(label.toLowerCase()));
+        if(!lw) return '';
+        const sameLine = words.filter(w=>Math.abs(w.top-lw.top)<3).sort((a,b)=>a.x0-b.x0);
+        const colonIdx = sameLine.findIndex(w=>w.text.includes(':'));
+        const rest = colonIdx>=0 ? sameLine.slice(colonIdx+1) : sameLine.slice(1);
+        return rest.map(w=>w.text).join(' ').replace(/^:\s*/,'').trim();
+      };
+      meta = {
+        academicYear: grab('Academic'), level: grab('Level'),
+        department: grab('Department'), section: grab('Section'),
+        specialization: grab('Specialization'),
+      };
+    }
+
+    const headerTop = dayWord.top;
+    const headerRow = words.filter(w=>Math.abs(w.top-headerTop)<3).sort((a,b)=>a.x0-b.x0);
+    const cols = [];
+    /* Different PDF/text-extraction engines tokenize differently: some give "Course Name"
+       as one fused token, others split it into "Course" + "Name". Handle both. */
+    for(let i=0;i<headerRow.length;i++){
+      const w = headerRow[i]; const low = w.text.toLowerCase().trim();
+      if(low==='course name'){ cols.push({label:'Course Name', x0:w.x0, x1:w.x1}); continue; }
+      if(low==='course' && headerRow[i+1] && headerRow[i+1].text.toLowerCase().trim()==='name'){ cols.push({label:'Course Name', x0:w.x0, x1:headerRow[i+1].x1}); i++; continue; }
+      if(low==='section no'){ cols.push({label:'Section No', x0:w.x0, x1:w.x1}); continue; }
+      if(low==='section' && headerRow[i+1] && headerRow[i+1].text.toLowerCase().trim()==='no'){ cols.push({label:'Section No', x0:w.x0, x1:headerRow[i+1].x1}); i++; continue; }
+      if(DAY_WORDS.includes(low)){ cols.push({label:dayCode(w.text), x0:w.x0, x1:w.x1}); continue; }
+    }
+    const sortedCols = [...cols].sort((a,b)=>a.x0-b.x0);
+    if(!sortedCols.length) return;
+    const bounds = sortedCols.map((c,i)=>({
+      label:c.label, left: i===0?0:(sortedCols[i-1].x1+c.x0)/2,
+      right: i===sortedCols.length-1? page.width : (c.x1+sortedCols[i+1].x0)/2,
+    }));
+    const cnameB = bounds.find(b=>b.label==='Course Name');
+    const snoB = bounds.find(b=>b.label==='Section No');
+    const dayBs = bounds.filter(b=>DAY_ORDER.includes(b.label));
+    if(!cnameB || !snoB || !dayBs.length) return;
+    const inCol = (w,b)=>{ const cx=(w.x0+w.x1)/2; return cx>=b.left && cx<b.right; };
+
+    const reportWord = words.find(w=>w.text.toLowerCase().startsWith('report'));
+    const cutoff = reportWord ? reportWord.top : 1e6;
+    const body = words.filter(w=>w.top>headerTop+5 && w.top<cutoff-5).sort((a,b)=> a.top-b.top || a.x0-b.x0);
+
+    /* a repeated header ("Section No") or a stray label is not a section number */
+    const anchors = body.filter(w=>inCol(w,snoB) && SECTION_ID_RE.test(w.text.trim())).sort((a,b)=>a.top-b.top);
+    /* rows of a second table's header / a mid-page "Academic Year" block must not
+       leak into the previous row's day cells */
+    const blockers = body.filter(w=>{
+      const low = w.text.toLowerCase().trim();
+      return low==='section no' || low==='course name' || low==='section' || low==='academic year:' || low.startsWith('academic year');
+    }).sort((a,b)=>a.top-b.top);
+
+    const firstAnchorTop = anchors.length? anchors[0].top : cutoff;
+    const firstBlockerTop = blockers.length? blockers[0].top : cutoff;
+    const preLimit = Math.min(firstAnchorTop, firstBlockerTop);
+    const pre = body.filter(w=>w.top < preLimit-1);
+    if(currentRowId!==null){
+      for(const w of pre){
+        if(inCol(w,cnameB) || inCol(w,snoB)) continue;
+        for(const db of dayBs){ if(inCol(w,db)){ rows[currentRowId].dayWords[db.label]=rows[currentRowId].dayWords[db.label]||[]; rows[currentRowId].dayWords[db.label].push(w); break; } }
+      }
+    }
+    anchors.forEach((a,i)=>{
+      const topBound = a.top-1;
+      let bottomBound = i+1<anchors.length? anchors[i+1].top-1 : cutoff-5;
+      const nextBlocker = blockers.find(b=>b.top>a.top+1);
+      if(nextBlocker && nextBlocker.top-1 < bottomBound) bottomBound = nextBlocker.top-1;
+      const rowWords = body.filter(w=>w.top>=topBound && w.top<bottomBound);
+      const cnameWords = rowWords.filter(w=>inCol(w,cnameB)).sort((x,y)=> x.top-y.top || x.x0-y.x0);
+      if(cnameWords.length){
+        const joined = fixHyphen(cnameWords.map(w=>w.text).join(' '));
+        const m = joined.match(/^([A-Z]{2,10}\d{3,6})\s*(.*)$/);
+        if(m) currentCourse = {code:m[1], name:m[2].trim()};
+      }
+      const rowId = nextRowId++;
+      const lvl = lastLevelBefore(levels, pno, a.top);
+      rows[rowId] = {course: currentCourse?{...currentCourse}:null, section:a.text.trim(), level:lvl, dayWords:{}};
+      rowOrder.push(rowId); currentRowId = rowId;
+      for(const db of dayBs){
+        const dw = rowWords.filter(w=>inCol(w,db)).sort((x,y)=> x.top-y.top || x.x0-y.x0);
+        if(dw.length) rows[rowId].dayWords[db.label]=dw;
+      }
+    });
+  });
+
+  function lastLevelBefore(list, page, top){
+    let best='';
+    for(const l of list){ if(l.page<page || (l.page===page && l.top<=top+1)) best=l.value; }
+    return best;
+  }
+
+  /* one day cell may in theory hold more than one meeting; split on every time range */
+  function parseDay(words){
+    words = [...words].sort((a,b)=> a.page-b.page || a.top-b.top || a.x0-b.x0);
+    /* Times / dashes / room codes never legitimately contain whitespace, so strip it
+       before matching the structural pattern. The original per-item text is still used
+       for the instructor name below. */
+    const raw = words.map(w=>w.text).join('').replace(/\s+/g,'');
+    const list = [];
+    const re = /(\d{1,2}:\d{2})-(\d{1,2}:\d{2})-([^\\]+?)\\/g;
+    let m;
+    while((m = re.exec(raw))!==null){
+      /* "12:00-14:00" also matches one character in ("2:00-14:00") — only accept a
+         match that really starts a time, i.e. not preceded by a digit or a colon. */
+      if(m.index>0 && /[\d:]/.test(raw[m.index-1])) continue;
+      const [, start, end, room] = m;
+      if(!validTime(start) || !validTime(end) || toMin(end)<=toMin(start)) continue;
+      list.push({start, end, room:room.trim()});
+    }
+    if(!list.length) return {raw, error:true, list:[]};
+    /* instructor = whatever follows the LAST backslash, across the wrapped fragments */
+    let found=false; const frags=[];
+    for(const w of words){
+      if(!found){
+        if(w.text.includes('\\')){ const after=w.text.split('\\').slice(1).join('\\'); if(after.trim()) frags.push(after.trim()); found=true; }
+      } else frags.push(w.text);
+    }
+    return {list, fragments:frags, error:false};
+  }
+  function validTime(s){ const [h,m]=s.split(':').map(Number); return h>=0&&h<=23&&m>=0&&m<=59; }
+
+  const results = [];
+  for(const rid of rowOrder){
+    const r = rows[rid];
+    const sessions = {};
+    for(const day in r.dayWords) sessions[day]=parseDay(r.dayWords[day]);
+    const valid = Object.entries(sessions).filter(([,s])=>!s.error && s.fragments);
+    let instrRaw='';
+    if(valid.length){
+      const best = valid.reduce((a,b)=> a[1].fragments.length<=b[1].fragments.length? a:b);
+      instrRaw = fixHyphen(best[1].fragments.join(' '));
+    }
+    results.push({course:r.course, section:r.section, level:r.level, sessions, instrRaw});
+  }
+  canonicaliseInstructors(results);
+  return {rows: results, meta, levels:[...new Set(levels.map(l=>l.value))]};
+}
+
+/* The same lecturer appears many times; wrapping breaks the name differently each time
+   ("Wardha" vs "War dha"). Group by the letters alone and keep the cleanest spelling. */
+function canonicaliseInstructors(rows){
+  const groups = new Map();
+  rows.forEach(r=>{
+    const key = (r.instrRaw||'').replace(/[^a-z0-9]/gi,'').toLowerCase();
+    if(!key) return;
+    if(!groups.has(key)) groups.set(key, new Map());
+    const variants = groups.get(key);
+    variants.set(r.instrRaw, (variants.get(r.instrRaw)||0)+1);
+  });
+  const canon = new Map();
+  groups.forEach((variants, key)=>{
+    let best=null, bestScore=null;
+    variants.forEach((count, text)=>{
+      const tokens = text.split(/\s+/).filter(Boolean).length;
+      const score = [tokens, -count, -text.length];
+      if(!bestScore || cmpScore(score,bestScore)<0){ bestScore=score; best=text; }
+    });
+    canon.set(key, {text:best, guessed:variants.size>1});
+  });
+  rows.forEach(r=>{
+    const key = (r.instrRaw||'').replace(/[^a-z0-9]/gi,'').toLowerCase();
+    const c = key? canon.get(key) : null;
+    r.instr = c? c.text : (r.instrRaw||'');
+    r.review = !r.instr || (c && c.guessed) || looksBroken(r.instr);
+  });
+  function cmpScore(a,b){ for(let i=0;i<a.length;i++){ if(a[i]!==b[i]) return a[i]-b[i]; } return 0; }
+  /* "Dr.Gh aith" — a non-initial token starting lowercase is a mid-word wrap.
+     "ASHIS H RASTOGI" — a bare single letter is a leftover too ("R." with a dot is
+     a real initial and stays). */
+  function looksBroken(name){
+    const tk = String(name).split(/\s+/).filter(Boolean);
+    for(let i=1;i<tk.length;i++){
+      if(/^[a-z]/.test(tk[i])) return true;
+      if(/^[A-Za-z]$/.test(tk[i])) return true;
+    }
+    return false;
+  }
+}
+
+/* group flat rows into the course/section structure the scheduler needs */
+function buildCourses(flatRows, multiLevel){
+  const map = new Map();
+  flatRows.forEach((r, idx)=>{
+    if(!r.course) return;
+    const sessions = [];
+    for(const day in r.sessions){
+      const s = r.sessions[day];
+      if(s.error) continue;
+      s.list.forEach(x=> sessions.push({day, start:x.start, end:x.end, room:x.room}));
+    }
+    if(!sessions.length) return;
+    const key = multiLevel ? r.course.code+'@@'+(r.level||'') : r.course.code;
+    if(!map.has(key)){
+      map.set(key, {
+        code:r.course.code,
+        name: r.course.name + (multiLevel && r.level ? ' · '+r.level : ''),
+        sections:[],
+      });
+    }
+    map.get(key).sections.push({
+      id: r.section, rowIdx: idx, sessions,
+      instrGuess: r.instr || '', needsReview: !!r.review,
+    });
+  });
+  const courses = [...map.values()];
+  courses.forEach((c,i)=>{
+    c.uid = i; c.editorOpen = false;
+    c.sections.sort((a,b)=>{
+      const na=parseInt(a.id,10), nb=parseInt(b.id,10);
+      if(!isNaN(na) && !isNaN(nb) && na!==nb) return na-nb;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  });
+  return courses;
+}
+
+/* ================= FILE HANDLING ================= */
+const MAX_FILE_BYTES = 25*1024*1024;
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+dropzone.addEventListener('click', ()=>fileInput.click());
+dropzone.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput.click(); } });
+['dragover','dragenter'].forEach(ev=>dropzone.addEventListener(ev, e=>{e.preventDefault(); dropzone.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev, e=>{e.preventDefault(); dropzone.classList.remove('drag');}));
+dropzone.addEventListener('drop', e=>{ const f=e.dataTransfer.files[0]; if(f) handleFile(f); });
+fileInput.addEventListener('change', e=>{ const f=e.target.files[0]; if(f) handleFile(f); e.target.value=''; });
+
+function showError(msg, detail){
+  const box = document.getElementById('errorBox');
+  box.textContent = msg;
+  if(detail){
+    const d = document.createElement('div');
+    d.style.cssText = 'margin-top:6px;font-size:11px;opacity:.8;font-family:monospace;word-break:break-word;';
+    d.textContent = String(detail).slice(0, 200);
+    box.appendChild(d);
+  }
+  box.classList.remove('hidden');
+  document.getElementById('statusRow').classList.add('hidden');
+}
+
+async function handleFile(file){
+  document.getElementById('errorBox').classList.add('hidden');
+  document.getElementById('noticeBox').classList.add('hidden');
+  const isPdf = file.type==='application/pdf' || /\.pdf$/i.test(file.name||'');
+  if(!isPdf) return showError(t().notPdf);
+  if(file.size > MAX_FILE_BYTES) return showError(t().tooBig);
+
+  document.getElementById('statusRow').classList.remove('hidden');
+  document.getElementById('statusText').textContent = t().parsing;
+  /* the panels stay up while parsing — a bad file must not throw away the
+     timetable the user already loaded and corrected */
+  try{
+    const pages = await extractPdfWords(file);
+    const {rows, meta, levels} = parsePages(pages);
+    const multiLevel = levels.length>1;
+    const courses = buildCourses(rows, multiLevel);
+    if(!courses.length) throw new Error('no-table-found');
+    state.courses = courses;
+    state.meta = meta;
+    state.included = Object.create(null);
+    state.locked = Object.create(null);
+    state.instrOverride = Object.create(null);
+    courses.forEach(c=>{
+      state.included[c.uid]=true; state.locked[c.uid]=null;
+      c.sections.forEach(s=>{ state.instrOverride[s.rowIdx] = s.instrGuess; });
+    });
+    state.visible = 12; state.excludedDays = new Set(); state.maxDays = null;
+    state.blockStart = null; state.blockEnd = null;
+    state.secPref = Object.create(null);
+    state.nextCourseUid = courses.length;
+    state.nextRowIdx = rows.length;
+    state.notice = multiLevel ? t().multiLevel : '';
+    document.getElementById('statusRow').classList.add('hidden');
+    const nb = document.getElementById('noticeBox');
+    nb.textContent = state.notice;
+    nb.classList.toggle('hidden', !state.notice);
+    renderMeta(); renderReview(); buildTimeSelects(); renderCourseManager(); buildDayFilters(); buildInstrFilters(); updateReviewToggleUI();
+    ['metaBlock','reviewBlock','courseBlock','filterBlock','resultsWrap'].forEach(id=>document.getElementById(id).classList.remove('hidden'));
+    render();
+  }catch(err){
+    console.error(err);
+    showError(err && err.message==='pdfjs-load-failed' ? t().libError : t().parseError, err && err.message);
+  }
+}
+
+/* ================= META + REVIEW UI ================= */
+function renderMeta(){
+  const L = t();
+  const rows = [
+    [L.metaAcademicYear, state.meta.academicYear], [L.metaLevel, state.meta.level],
+    [L.metaDepartment, state.meta.department], [L.metaSection, state.meta.section],
+    [L.metaSpecialization, state.meta.specialization],
+  ].filter(([,v])=>v);
+  document.getElementById('metaGrid').innerHTML = rows.map(([k,v])=>`<div><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
+}
+
+function renderReview(){
+  const L = t();
+  let flagged = 0;
+  const html = [];
+  state.courses.forEach((c,ci)=>{
+    c.sections.forEach(s=>{
+      if(s.needsReview) flagged++;
+      const daysStr = s.sessions.map(x=>L.days[x.day]).join(L.daySep);
+      const timeStr = s.sessions.map(x=>fmt12str(x.start)+'–'+fmt12str(x.end)).join(' / ');
+      html.push(`<div class="rrow">
+        <span class="sw" style="background:var(--${PALETTE[ci%PALETTE.length]})"></span>
+        <div class="course"><code>${esc(c.code)}</code> ${esc(L.sec)} ${esc(s.id)}</div>
+        <div class="sched">${esc(daysStr)} · <span dir="ltr">${esc(timeStr)}</span></div>
+        <input class="instr ${s.needsReview?'flag':''}" data-rowidx="${esc(s.rowIdx)}" value="${esc(state.instrOverride[s.rowIdx] ?? '')}" placeholder="${esc(L.instrPlaceholder)}" autocomplete="off" spellcheck="false">
+      </div>`);
+    });
+  });
+  document.getElementById('reviewRows').innerHTML = html.join('');
+  document.getElementById('flagCount').textContent = L.flagged(flagged);
+  document.getElementById('flagCount').style.display = flagged? '' : 'none';
+  document.querySelectorAll('.rrow input.instr').forEach(inp=>{
+    inp.addEventListener('input', e=>{
+      state.instrOverride[e.target.dataset.rowidx] = e.target.value;
+      syncInstr(e.target.dataset.rowidx, e.target.value, e.target);
+      buildInstrFilters();
+      renderResultsOnly();
+    });
+  });
+}
+
+function syncInstr(rowIdx, val, exclude){
+  const sel = `[data-rowidx="${String(rowIdx).replace(/"/g,'')}"]`;
+  document.querySelectorAll('input.instr'+sel+', input.sec-instr-input'+sel).forEach(el=>{
+    if(el!==exclude && el.value!==val) el.value = val;
+  });
+}
+
+function updateReviewToggleUI(){
+  const L = t();
+  document.getElementById('reviewContent').classList.toggle('hidden', !state.reviewOpen);
+  document.getElementById('reviewToggleBtn').textContent = state.reviewOpen ? L.reviewHide : L.reviewShow;
+}
+document.getElementById('reviewToggleBtn').addEventListener('click', ()=>{
+  state.reviewOpen = !state.reviewOpen;
+  updateReviewToggleUI();
+});
+
+/* ================= COURSE / SECTION MANAGER ================= */
+const DAY_MIN = 6*60, DAY_MAX = 22*60, SLOT = 30;
+/* `from` makes the end-time list start after the chosen start time, so a
+   backwards session can't be picked in the first place. */
+function timeOptionsHtml(selected, from){
+  const first = Math.max(DAY_MIN, from==null ? DAY_MIN : from);
+  const opts = [];
+  for(let m=first; m<=DAY_MAX; m+=SLOT){
+    const val = fmt(m);
+    opts.push(`<option value="${val}" ${val===selected?'selected':''}>${esc(fmt12(m))}</option>`);
+  }
+  return opts.join('');
+}
+/* end must be after start; keep the meeting's length when the start moves */
+function normaliseSession(sess, movedField, prevStart){
+  let st = toMin(sess.start), en = toMin(sess.end);
+  if(!isFinite(st)) st = 8*60;
+  st = Math.min(Math.max(st, DAY_MIN), DAY_MAX - SLOT);
+  if(movedField === 'start'){
+    /* measure against where the start WAS, so dragging it keeps the length */
+    const prev = prevStart==null ? null : toMin(prevStart);
+    const dur = (prev!=null && isFinite(en) && en > prev) ? en - prev : SLOT*2;
+    en = Math.min(st + dur, DAY_MAX);
+  }
+  if(!isFinite(en) || en <= st) en = Math.min(st + SLOT*2, DAY_MAX);
+  if(en <= st) st = Math.max(DAY_MIN, en - SLOT);
+  sess.start = fmt(st); sess.end = fmt(en);
+  return sess;
+}
+function dayOptionsHtml(selected){
+  const L = t();
+  return DAY_ORDER.map(d=>`<option value="${d}" ${d===selected?'selected':''}>${esc(L.days[d])}</option>`).join('');
+}
+
+function validateCourse(course){
+  const counts = Object.create(null);
+  course.sections.forEach(s=>{
+    const key = (s.id||'').trim().toLowerCase();
+    if(!key) return;
+    counts[key] = (counts[key]||0)+1;
+  });
+  const dupKeys = new Set(Object.keys(counts).filter(k=>counts[k]>1));
+  course.sections.forEach(s=> s.isDup = dupKeys.has((s.id||'').trim().toLowerCase()));
+  course.dupIds = [...new Set(course.sections.filter(s=>s.isDup).map(s=>s.id))];
+  course.hasDuplicate = course.dupIds.length>0;
+  course.sections.forEach(s=>{
+    s.badTime = s.sessions.some(x=>!(toMin(x.end) > toMin(x.start)));
+  });
+  course.badTimeIds = [...new Set(course.sections.filter(s=>s.badTime).map(s=>s.id))];
+  course.hasBadTime = course.badTimeIds.length>0;
+  course.allExcluded = course.sections.length>0 && course.sections.every(s=>s.excluded);
+  course.noSections = course.sections.length===0;
+}
+
+function renderCourseManager(){
+  const L = t();
+  state.courses.forEach(validateCourse);
+  const el = document.getElementById('courseRows');
+  el.innerHTML = state.courses.map((c,ci)=>{
+    const sw = `background:var(--${PALETTE[ci%PALETTE.length]})`;
+    const sectionsHtml = c.sections.map(s=>`
+      <div class="sec-editor ${s.isDup?'dup':''}" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}">
+        <div class="sec-editor-head">
+          <input class="sec-id-input" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}" value="${esc(s.id)}" placeholder="${esc(L.sectionIdPlaceholder)}" autocomplete="off">
+          <input class="sec-instr-input" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}" value="${esc(state.instrOverride[s.rowIdx] ?? s.instrGuess ?? '')}" placeholder="${esc(L.instrPlaceholder)}" autocomplete="off" spellcheck="false">
+          <button type="button" class="icon-btn del-section" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}" title="${esc(L.delSectionTooltip)}">🗑</button>
+        </div>
+        <div class="sessions-editor">
+          ${s.sessions.map((sess,si)=>`
+            <div class="session-edit-row ${toMin(sess.end)>toMin(sess.start)?'':'bad'}">
+              <select class="sess-field" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}" data-si="${si}" data-field="day">${dayOptionsHtml(sess.day)}</select>
+              <select class="sess-field" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}" data-si="${si}" data-field="start">${timeOptionsHtml(sess.start)}</select>
+              <select class="sess-field" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}" data-si="${si}" data-field="end">${timeOptionsHtml(sess.end, toMin(sess.start)+SLOT)}</select>
+              <input class="sess-field room" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}" data-si="${si}" data-field="room" value="${esc(sess.room||'')}" placeholder="${esc(L.roomPlaceholder)}" autocomplete="off">
+              <button type="button" class="icon-btn del-session" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}" data-si="${si}">✕</button>
+            </div>`).join('')}
+          <button type="button" class="btn small add-session" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}">${esc(L.addSession)}</button>
+        </div>
+      </div>`).join('');
+    return `<div class="course-card">
+      <div class="course-row">
+        <input type="checkbox" data-uid="${esc(c.uid)}" class="incl" ${state.included[c.uid]?'checked':''} ${c.hasDuplicate?'disabled':''}>
+        <div class="name">
+          <span class="sw" style="width:9px;height:9px;border-radius:3px;${sw}"></span>
+          <input class="code-input" data-uid="${esc(c.uid)}" value="${esc(c.code)}" placeholder="${esc(L.codePlaceholder)}" autocomplete="off">
+          <input class="name-input" data-uid="${esc(c.uid)}" value="${esc(c.name)}" placeholder="${esc(L.namePlaceholder)}" autocomplete="off">
+        </div>
+        <select data-uid="${esc(c.uid)}" class="lock">
+          <option value="">${esc(L.anySection)}</option>
+          ${c.sections.filter(s=>!s.excluded).map(s=>`<option value="${esc(s.id)}" ${state.locked[c.uid]===s.id?'selected':''}>${esc(L.sec)} ${esc(s.id)} — ${esc(s.sessions.map(x=>L.days[x.day]).join('/'))} ${esc(s.sessions.length?fmt12str(s.sessions[0].start):'')}</option>`).join('')}
+        </select>
+        <div class="row-actions">
+          <button type="button" class="icon-btn toggle-editor" data-uid="${esc(c.uid)}">${c.editorOpen? '▲' : '✎'}</button>
+          <button type="button" class="icon-btn del-course" data-uid="${esc(c.uid)}" title="${esc(L.delCourseTooltip)}">🗑</button>
+        </div>
+      </div>
+      ${c.sections.length>1 ? `<div class="sec-chips-row">
+        <span class="sec-chips-label">${esc(L.excludeLabel)}</span>
+        <div class="sec-chips">
+          ${c.sections.map(s=>`<button type="button" class="sec-chip ${s.excluded?'excluded':''}" data-uid="${esc(c.uid)}" data-rowidx="${esc(s.rowIdx)}">${esc(s.id)}</button>`).join('')}
+        </div>
+      </div>` : ''}
+      ${c.hasDuplicate? `<div class="dup-warning dup-msg">${esc(L.dupWarning(c.dupIds))}</div>` : ''}
+      ${c.hasBadTime? `<div class="dup-warning">${esc(L.badTimeWarning(c.badTimeIds))}</div>` : ''}
+      ${c.allExcluded? `<div class="dup-warning">${esc(L.allExcludedWarning)}</div>` : ''}
+      ${c.noSections? `<div class="dup-warning">${esc(L.noSectionsWarning)}</div>` : ''}
+      <div class="sections-wrap ${c.editorOpen? '':'hidden'}">
+        ${sectionsHtml}
+        <button type="button" class="btn small add-section" data-uid="${esc(c.uid)}">${esc(L.addSection)}</button>
+      </div>
+    </div>`;
+  }).join('') + `<button type="button" class="btn primary small" id="addCourseBtn" style="margin-top:6px;">${esc(L.addCourse)}</button>`;
+
+  wireCourseManagerEvents();
+}
+
+function refreshDupUI(uid){
+  const c = findCourse(uid); if(!c) return;
+  const L = t();
+  const codeInput = document.querySelector(`.code-input[data-uid="${String(uid).replace(/"/g,'')}"]`);
+  const card = codeInput ? codeInput.closest('.course-card') : null;
+  if(!card) return;
+  card.querySelectorAll('.sec-editor').forEach(secEl=>{
+    const sec = c.sections.find(s=>String(s.rowIdx)===String(secEl.dataset.rowidx));
+    secEl.classList.toggle('dup', !!(sec && sec.isDup));
+  });
+  /* .dup-msg, not .dup-warning — the all-excluded and no-sections notices reuse the
+     same styling class and must not be clobbered by the duplicate check. */
+  let warn = card.querySelector('.dup-msg');
+  if(c.hasDuplicate){
+    if(!warn){ warn = document.createElement('div'); warn.className='dup-warning dup-msg'; card.querySelector('.course-row').insertAdjacentElement('afterend', warn); }
+    warn.textContent = L.dupWarning(c.dupIds);
+  } else if(warn){ warn.remove(); }
+  const cb = card.querySelector('input.incl');
+  if(cb) cb.disabled = c.hasDuplicate;
+}
+
+function findCourse(uid){ return state.courses.find(c=>String(c.uid)===String(uid)); }
+function findSection(uid, rowIdx){ const c=findCourse(uid); return c ? {course:c, section:c.sections.find(s=>String(s.rowIdx)===String(rowIdx))} : {}; }
+
+function afterDataChange(){
+  renderCourseManager(); renderReview(); buildTimeSelects(); buildDayFilters(); buildInstrFilters(); render();
+}
+
+function wireCourseManagerEvents(){
+  const el = document.getElementById('courseRows');
+  el.querySelectorAll('.incl').forEach(cb=>cb.addEventListener('change', e=>{ state.included[e.target.dataset.uid]=e.target.checked; state.visible=12; render(); }));
+  el.querySelectorAll('select.lock').forEach(sel=>sel.addEventListener('change', e=>{ state.locked[e.target.dataset.uid]= e.target.value||null; state.visible=12; render(); }));
+  el.querySelectorAll('.code-input').forEach(inp=>inp.addEventListener('input', e=>{ const c=findCourse(e.target.dataset.uid); if(c) c.code=e.target.value; render(); }));
+  el.querySelectorAll('.name-input').forEach(inp=>inp.addEventListener('input', e=>{ const c=findCourse(e.target.dataset.uid); if(c) c.name=e.target.value; render(); }));
+  el.querySelectorAll('.toggle-editor').forEach(btn=>btn.addEventListener('click', e=>{ const c=findCourse(e.currentTarget.dataset.uid); if(c){ c.editorOpen=!c.editorOpen; renderCourseManager(); } }));
+  el.querySelectorAll('.del-course').forEach(btn=>btn.addEventListener('click', e=>{
+    const uid = e.currentTarget.dataset.uid;
+    const gone = findCourse(uid);
+    if(gone) gone.sections.forEach(sec=>{ delete state.instrOverride[sec.rowIdx]; delete state.secPref[sec.rowIdx]; });
+    state.courses = state.courses.filter(c=>String(c.uid)!==String(uid));
+    delete state.included[uid]; delete state.locked[uid];
+    afterDataChange();
+  }));
+  document.getElementById('addCourseBtn')?.addEventListener('click', ()=>{
+    const uid = state.nextCourseUid++;
+    state.courses.push({uid, code:'', name:'', sections:[], editorOpen:true});
+    state.included[uid]=true; state.locked[uid]=null;
+    afterDataChange();
+  });
+  el.querySelectorAll('.add-section').forEach(btn=>btn.addEventListener('click', e=>{
+    const c = findCourse(e.currentTarget.dataset.uid); if(!c) return;
+    const nums = c.sections.map(s=>parseInt(s.id,10)).filter(n=>!isNaN(n));
+    const nextId = nums.length? String(Math.max(...nums)+1) : '1';
+    const rowIdx = state.nextRowIdx++;
+    c.sections.push({id:nextId, rowIdx, sessions:[{day:'Sun', start:'08:00', end:'10:00', room:''}], instrGuess:'', needsReview:false});
+    state.instrOverride[rowIdx] = '';
+    delete state.secPref[rowIdx];
+    c.editorOpen = true;
+    afterDataChange();
+  }));
+  el.querySelectorAll('.del-section').forEach(btn=>btn.addEventListener('click', e=>{
+    const c = findCourse(e.currentTarget.dataset.uid); if(!c) return;
+    const rowIdx = e.currentTarget.dataset.rowidx;
+    c.sections = c.sections.filter(s=>String(s.rowIdx)!==String(rowIdx));
+    delete state.instrOverride[rowIdx];
+    delete state.secPref[rowIdx];
+    afterDataChange();
+  }));
+  el.querySelectorAll('.sec-chip').forEach(chip=>chip.addEventListener('click', e=>{
+    const {section} = findSection(e.currentTarget.dataset.uid, e.currentTarget.dataset.rowidx);
+    if(!section) return;
+    section.excluded = !section.excluded;
+    if(section.excluded && state.locked[e.currentTarget.dataset.uid]===section.id) state.locked[e.currentTarget.dataset.uid]=null;
+    afterDataChange();
+  }));
+  el.querySelectorAll('.sec-id-input').forEach(inp=>inp.addEventListener('input', e=>{
+    const {section} = findSection(e.target.dataset.uid, e.target.dataset.rowidx);
+    if(section) section.id = e.target.value;
+    const c = findCourse(e.target.dataset.uid);
+    if(c) validateCourse(c);
+    refreshDupUI(e.target.dataset.uid);
+    render();
+  }));
+  el.querySelectorAll('.sec-instr-input').forEach(inp=>inp.addEventListener('input', e=>{
+    state.instrOverride[e.target.dataset.rowidx] = e.target.value;
+    syncInstr(e.target.dataset.rowidx, e.target.value, e.target);
+    buildInstrFilters();
+    render();
+  }));
+  el.querySelectorAll('.add-session').forEach(btn=>btn.addEventListener('click', e=>{
+    const {section} = findSection(e.currentTarget.dataset.uid, e.currentTarget.dataset.rowidx);
+    if(section) section.sessions.push({day:'Sun', start:'08:00', end:'10:00', room:''});
+    afterDataChange();
+  }));
+  el.querySelectorAll('.del-session').forEach(btn=>btn.addEventListener('click', e=>{
+    const {section} = findSection(e.currentTarget.dataset.uid, e.currentTarget.dataset.rowidx);
+    if(section) section.sessions.splice(Number(e.currentTarget.dataset.si),1);
+    afterDataChange();
+  }));
+  el.querySelectorAll('select.sess-field').forEach(field=>field.addEventListener('change', e=>{
+    const {section} = findSection(e.target.dataset.uid, e.target.dataset.rowidx);
+    if(section){
+      const sess = section.sessions[Number(e.target.dataset.si)];
+      const f = e.target.dataset.field;
+      const prevStart = sess.start;
+      sess[f] = e.target.value;
+      if(f==='start' || f==='end') normaliseSession(sess, f, prevStart);
+    }
+    afterDataChange();
+  }));
+  el.querySelectorAll('input.sess-field.room').forEach(field=>field.addEventListener('input', e=>{
+    const {section} = findSection(e.target.dataset.uid, e.target.dataset.rowidx);
+    if(section) section.sessions[Number(e.target.dataset.si)][e.target.dataset.field] = e.target.value;
+    render();
+  }));
+}
+
+function timetableBounds(){
+  const allTimes = new Set();
+  state.courses.forEach(c=>c.sections.forEach(s=>s.sessions.forEach(x=>{allTimes.add(toMin(x.start)); allTimes.add(toMin(x.end));})));
+  const times = [...allTimes].sort((a,b)=>a-b);
+  return {
+    min: times.length? Math.floor(times[0]/60)*60 : 8*60,
+    max: times.length? Math.ceil(times[times.length-1]/60)*60 : 18*60,
+  };
+}
+/* Both filter pairs are ranges, so the "to" list starts after the "from" value and
+   the pair is reconciled on every change — a backwards window can't be selected. */
+function normaliseRange(startKey, endKey, moved, prevStart, step, bounds){
+  let st = state[startKey], en = state[endKey];
+  if(st===null || en===null) return;
+  if(moved===startKey && prevStart!==null && en > prevStart){
+    en = st + (en - prevStart);                 /* dragging "from" carries "to" along */
+  }
+  if(en <= st) en = st + step;
+  if(en > bounds.max){
+    en = bounds.max;
+    if(st >= en) st = Math.max(bounds.min, en - step);
+  }
+  state[startKey] = st; state[endKey] = en;
+}
+function buildTimeSelects(){
+  const L = t();
+  const {min, max} = timetableBounds();
+  const list = (step, from, selected)=>{
+    const out = [`<option value="">${esc(L.noSelect)}</option>`];
+    for(let m=Math.max(min, from==null?min:from); m<=max; m+=step){
+      out.push(`<option value="${m}" ${String(m)===String(selected)?'selected':''}>${esc(fmt12(m))}</option>`);
+    }
+    return out.join('');
+  };
+  document.getElementById('minStart').innerHTML = list(60, null, state.minStart);
+  document.getElementById('maxEnd').innerHTML   = list(60, state.minStart===null? null : state.minStart+60, state.maxEnd);
+  document.getElementById('minStart').value = state.minStart ?? '';
+  document.getElementById('maxEnd').value   = state.maxEnd ?? '';
+
+  document.getElementById('blockStart').innerHTML = list(30, null, state.blockStart);
+  document.getElementById('blockEnd').innerHTML   = list(30, state.blockStart===null? null : state.blockStart+30, state.blockEnd);
+  document.getElementById('blockStart').value = state.blockStart ?? '';
+  document.getElementById('blockEnd').value   = state.blockEnd ?? '';
+}
+
+/* ---- instructor preference chips, grouped per course ----
+   The preference is stored on the sections themselves, so renaming an instructor in
+   "Verify instructor names" or "Courses & sections" keeps the choice intact. */
+function prefOf(secs){
+  if(!secs.length) return 'none';
+  if(secs.every(s=>state.secPref[s.rowIdx]==='only')) return 'only';
+  if(secs.every(s=>state.secPref[s.rowIdx]==='avoid')) return 'avoid';
+  return 'none';
+}
+function buildInstrFilters(){
+  const L = t();
+  const group = document.getElementById('instrGroup');
+  const rows = [];
+  state.courses.forEach((c,ci)=>{
+    const byName = new Map();
+    c.sections.forEach(s=>{
+      const n = instrOf(s);
+      if(!n) return;
+      if(!byName.has(n)) byName.set(n, []);
+      byName.get(n).push(s);
+    });
+    if(!byName.size) return;
+    const chips = [...byName.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([n,secs])=>{
+      const st = prefOf(secs);
+      const cls = st==='only' ? 'only' : (st==='avoid' ? 'avoid' : '');
+      const count = secs.length;
+      return `<button type="button" class="instr-chip ${cls}" data-uid="${esc(c.uid)}" data-instr="${esc(n)}" title="${esc(n)}">${esc(n)}${count>1?` (${count})`:''}</button>`;
+    }).join('');
+    rows.push(`<div class="instr-row">
+      <span class="instr-course"><span class="sw" style="background:var(--${PALETTE[ci%PALETTE.length]})"></span><code>${esc(c.code||'—')}</code></span>
+      <div class="instr-chips">${chips}</div>
+    </div>`);
+  });
+  group.innerHTML = rows.length ? rows.join('') : `<div class="hint">${esc(L.instrNone)}</div>`;
+  document.getElementById('instrHint').textContent = rows.length ? L.instrHint : '';
+  group.querySelectorAll('.instr-chip').forEach(btn=>btn.addEventListener('click', e=>{
+    const uid = e.currentTarget.dataset.uid, name = e.currentTarget.dataset.instr;
+    const c = findCourse(uid); if(!c) return;
+    const secs = c.sections.filter(s=>instrOf(s)===name);
+    const next = {none:'only', only:'avoid', avoid:'none'}[prefOf(secs)];
+    secs.forEach(s=>{ if(next==='none') delete state.secPref[s.rowIdx]; else state.secPref[s.rowIdx]=next; });
+    buildInstrFilters(); state.visible=12; render();
+  }));
+}
+
+/* ---- reset every condition in section 4 (course/section choices are untouched) ---- */
+function resetConditions(){
+  state.minStart=null; state.maxEnd=null; state.noGaps=false; state.sortMode='compact';
+  state.excludedDays=new Set(); state.maxDays=null;
+  state.blockStart=null; state.blockEnd=null;
+  state.secPref=Object.create(null);
+  state.visible=12;
+  document.getElementById('noGaps').checked=false;
+  document.getElementById('sortMode').value='compact';
+  buildTimeSelects(); buildDayFilters(); buildInstrFilters(); render();
+}
+document.getElementById('resetFiltersBtn').addEventListener('click', resetConditions);
+
+
+function buildDayFilters(){
+  const L = t();
+  const days = dayLabelsPresent();
+  const group = document.getElementById('daysOffGroup');
+  group.innerHTML = days.map(d=>`<button type="button" class="day-chip ${state.excludedDays.has(d)?'active':''}" data-day="${d}">${esc(L.days[d])}</button>`).join('');
+  group.querySelectorAll('.day-chip').forEach(btn=>btn.addEventListener('click', ()=>{
+    const d = btn.dataset.day;
+    if(state.excludedDays.has(d)) state.excludedDays.delete(d); else state.excludedDays.add(d);
+    btn.classList.toggle('active');
+    state.visible=12; render();
+  }));
+
+  const maxSel = document.getElementById('maxDays');
+  const opts = [`<option value="">${esc(L.noSelect)}</option>`];
+  for(let n=1; n<=days.length; n++) opts.push(`<option value="${n}">${esc(L.maxDaysOpt(n))}</option>`);
+  maxSel.innerHTML = opts.join('');
+  maxSel.value = state.maxDays ?? '';
+}
+
+['minStart','maxEnd'].forEach(id=>document.getElementById(id).addEventListener('change', e=>{
+  const prevStart = state.minStart;
+  state[id] = e.target.value? Number(e.target.value): null;
+  normaliseRange('minStart','maxEnd', id, prevStart, 60, timetableBounds());
+  buildTimeSelects();
+  state.visible=12; render();
+}));
+document.getElementById('sortMode').addEventListener('change', e=>{ state.sortMode=e.target.value; state.visible=12; render(); });
+document.getElementById('noGaps').addEventListener('change', e=>{ state.noGaps=e.target.checked; state.visible=12; render(); });
+document.getElementById('maxDays').addEventListener('change', e=>{ state.maxDays = e.target.value? Number(e.target.value): null; state.visible=12; render(); });
+['blockStart','blockEnd'].forEach(id=>document.getElementById(id).addEventListener('change', e=>{
+  const prevStart = state.blockStart;
+  state[id] = e.target.value? Number(e.target.value): null;
+  normaliseRange('blockStart','blockEnd', id, prevStart, 30, timetableBounds());
+  buildTimeSelects();
+  state.visible=12; render();
+}));
+document.getElementById('loadmoreBtn')?.addEventListener('click', ()=>{ state.visible+=12; render(); });
+
+/* ================= COMBINATORICS ================= */
+const MAX_COMBOS = 20000;
+const MAX_EXPORT_PAGES = 35;   /* one PDF page per option — keeps a bulk export sane */
+const MAX_VISITS = 3000000;
+function activeCourses(){ return state.courses.filter(c=>state.included[c.uid] && !c.hasDuplicate); }
+function instrOf(s){ return String(state.instrOverride[s.rowIdx] ?? s.instrGuess ?? '').trim(); }
+function selectableSections(c){
+  const locked = state.locked[c.uid];
+  const base = locked ? c.sections.filter(s=>String(s.id)===String(locked)) : c.sections;
+  let list = base.filter(s=>!s.excluded && s.sessions.length>0 && !s.badTime);
+  list = list.filter(s=>state.secPref[s.rowIdx]!=='avoid');
+  /* "only" is scoped to this course: if an instructor is starred here, keep just their
+     sections of THIS course and leave every other course untouched. */
+  const preferred = list.filter(s=>state.secPref[s.rowIdx]==='only');
+  if(preferred.length) list = preferred;
+  return list;
+}
+
+/* Depth-first with conflict pruning: a clashing branch is abandoned immediately instead of
+   materialising the full cartesian product (30 sections x 6 courses would freeze the tab). */
+function generateCombos(){
+  const list = activeCourses().map(c=>({c, opts:selectableSections(c)}));
+  const skipped = list.filter(x=>x.opts.length===0).map(x=>x.c.code || '—');
+  const use = list.filter(x=>x.opts.length>0);
+  if(!use.length) return {combos:[], truncated:false, skipped};
+
+  const out=[]; const picks=[]; const busy=Object.create(null);
+  let truncated=false, visits=0;
+
+  function selfClash(sec){
+    for(let i=0;i<sec.sessions.length;i++) for(let j=i+1;j<sec.sessions.length;j++){
+      const A=sec.sessions[i], B=sec.sessions[j];
+      if(A.day===B.day && toMin(A.start)<toMin(B.end) && toMin(B.start)<toMin(A.end)) return true;
+    }
+    return false;
+  }
+  function fits(sec){
+    if(selfClash(sec)) return false;
+    for(const s of sec.sessions){
+      const st=toMin(s.start), en=toMin(s.end);
+      if(!(en > st)) return false;              /* a backwards session is never schedulable */
+      const arr = busy[s.day]; if(!arr) continue;
+      for(let k=0;k<arr.length;k++){ if(st<arr[k][1] && arr[k][0]<en) return false; }
+    }
+    return true;
+  }
+  function push(sec){ sec.sessions.forEach(s=>{ (busy[s.day]=busy[s.day]||[]).push([toMin(s.start),toMin(s.end)]); }); }
+  function pop(sec){ for(let i=sec.sessions.length-1;i>=0;i--) busy[sec.sessions[i].day].pop(); }
+
+  (function dfs(i){
+    if(truncated) return;
+    if(i===use.length){
+      out.push(picks.slice());
+      if(out.length>=MAX_COMBOS) truncated=true;
+      return;
+    }
+    const {c, opts} = use[i];
+    const colorIdx = state.courses.indexOf(c);
+    for(const sec of opts){
+      if(truncated) return;
+      if(++visits > MAX_VISITS){ truncated=true; return; }
+      if(!fits(sec)) continue;
+      push(sec);
+      picks.push({code:c.code, name:c.name, colorIdx, section:sec});
+      dfs(i+1);
+      picks.pop(); pop(sec);
+    }
+  })(0);
+
+  return {combos:out, truncated, skipped};
+}
+
+function analyzeCombo(combo){
+  const byDay = Object.create(null);
+  for(const pick of combo) for(const s of pick.section.sessions)
+    (byDay[s.day]=byDay[s.day]||[]).push({...s, code:pick.code, colorIdx:pick.colorIdx, rowIdx:pick.section.rowIdx});
+  let conflict=false, totalGap=0, earliest=Infinity, latest=-Infinity;
+  for(const day of Object.keys(byDay)){
+    const sorted = byDay[day].sort((a,b)=>toMin(a.start)-toMin(b.start));
+    let maxEnd=-Infinity;
+    sorted.forEach((s,i)=>{
+      const st=toMin(s.start), en=toMin(s.end);
+      if(st<maxEnd) conflict=true;
+      if(i>0){ const gap=st-maxEnd; if(gap>0) totalGap+=gap; }
+      maxEnd=Math.max(maxEnd,en); earliest=Math.min(earliest,st); latest=Math.max(latest,en);
+    });
+    byDay[day]=sorted;
+  }
+  return {combo, byDay, conflict, totalGap, earliest, latest, daysUsed:Object.keys(byDay).length};
+}
+
+function passesFilters(a){
+  for(const day of Object.keys(a.byDay)){
+    if(state.excludedDays.has(day)) return false;
+    const sess = a.byDay[day]; const first=sess[0], last=sess[sess.length-1];
+    if(state.minStart!==null && toMin(first.start)<state.minStart) return false;
+    if(state.maxEnd!==null && toMin(last.end)>state.maxEnd) return false;
+  }
+  if(state.noGaps && a.totalGap>0) return false;
+  if(state.maxDays!==null && a.daysUsed>state.maxDays) return false;
+  if(state.blockStart!==null && state.blockEnd!==null && state.blockEnd>state.blockStart){
+    for(const day of Object.keys(a.byDay)){
+      for(const s of a.byDay[day]){
+        if(toMin(s.start) < state.blockEnd && state.blockStart < toMin(s.end)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+/* ---- why is the result set empty? ---- */
+function sectionsClash(a,b){
+  for(const x of a.sessions) for(const y of b.sessions){
+    if(x.day===y.day && toMin(x.start)<toMin(y.end) && toMin(y.start)<toMin(x.end)) return true;
+  }
+  return false;
+}
+function countWith(overrides, all){
+  const keys = ['minStart','maxEnd','noGaps','maxDays','excludedDays','blockStart','blockEnd'];
+  const saved = {}; keys.forEach(k=> saved[k]=state[k]);
+  Object.assign(state, overrides);
+  const n = all.filter(passesFilters).length;
+  Object.assign(state, saved);
+  return n;
+}
+function explainEmpty(all){
+  const L = t();
+  if(!all.length){
+    const list = activeCourses().map(c=>({c, opts:selectableSections(c)}));
+    if(list.some(x=>x.opts.length===0)) return {title:L.whyTitle, items:[L.whyNoSections]};
+    const usable = list.filter(x=>x.opts.length);
+    const pairs = [];
+    for(let i=0;i<usable.length;i++){
+      for(let j=i+1;j<usable.length;j++){
+        let ok=false;
+        outer: for(const a of usable[i].opts){ for(const b of usable[j].opts){ if(!sectionsClash(a,b)){ ok=true; break outer; } } }
+        if(!ok) pairs.push((usable[i].c.code||'?')+' ↔ '+(usable[j].c.code||'?'));
+      }
+    }
+    if(pairs.length) return {title:L.whyClashIntro, items:pairs};
+    return {title:L.whyTitle, items:[L.whyDeeper]};
+  }
+  const items = [];
+  const add = (label, ov)=>{ const n = countWith(ov, all); if(n>0) items.push(L.whyRelax(label, n)); };
+  if(state.minStart!==null) add(L.lblMinStart, {minStart:null});
+  if(state.maxEnd!==null) add(L.lblMaxEnd, {maxEnd:null});
+  if(state.noGaps) add(L.lblNoGaps, {noGaps:false});
+  if(state.maxDays!==null) add(L.lblMaxDays, {maxDays:null});
+  if(state.excludedDays.size) add(L.lblDaysOff, {excludedDays:new Set()});
+  if(state.blockStart!==null && state.blockEnd!==null) add(L.lblBlock, {blockStart:null, blockEnd:null});
+  if(!items.length) return {title:L.whyTitle, items:[L.whyDeeper]};
+  return {title:L.whyRelaxIntro, items};
+}
+
+function sortResults(list){
+  const arr=[...list];
+  if(state.sortMode==='compact') arr.sort((a,b)=> a.totalGap-b.totalGap || a.daysUsed-b.daysUsed);
+  else if(state.sortMode==='days') arr.sort((a,b)=> a.daysUsed-b.daysUsed || a.totalGap-b.totalGap);
+  else if(state.sortMode==='early') arr.sort((a,b)=> a.earliest-b.earliest || a.totalGap-b.totalGap);
+  return arr;
+}
+
+/* ================= RESULTS RENDER ================= */
+const dayLabelsPresent = ()=>{
+  const set = new Set();
+  state.courses.forEach(c=>c.sections.forEach(s=>s.sessions.forEach(x=>set.add(x.day))));
+  return DAY_ORDER.filter(d=>set.has(d));
+};
+
+function gridBounds(analysis){
+  let gStart, gEnd;
+  if(isFinite(analysis.earliest) && isFinite(analysis.latest)){
+    gStart = Math.floor(analysis.earliest/60)*60;
+    gEnd = Math.ceil(analysis.latest/60)*60;
+    if(gEnd<=gStart) gEnd = gStart+60;
+  } else { gStart = 8*60; gEnd = 18*60; }
+  return {gStart, gEnd};
+}
+
+/* The axis is drawn with absolute offsets instead of grid rows: an hour is always
+   exactly 2 * --rowh pixels, so labels and blocks can never drift apart. */
+function renderMiniGrid(analysis, DAYS){
+  const L = t();
+  const {gStart, gEnd} = gridBounds(analysis);
+  const STEP = 30;
+  const rowh = 19;
+  const px = (min)=> (min-gStart)/STEP*rowh;
+  const bodyH = px(gEnd);
+
+  let axis='';
+  for(let m=gStart; m<=gEnd; m+=60){
+    axis += `<div class="mg-tick" style="top:${px(m)}px">${esc(fmt12axis(m))}</div>`;
+  }
+  const cols = DAYS.map(d=>{
+    const blocks = (analysis.byDay[d]||[]).map(s=>{
+      const top = px(toMin(s.start));
+      const h = Math.max(px(toMin(s.end)) - top, rowh/2);
+      const showRoom = h>=52 && s.room;
+      return `<div class="sess" style="top:${top}px;height:${h}px;background:var(--${PALETTE[s.colorIdx%PALETTE.length]})" title="${esc(s.code+' · '+fmt12str(s.start)+'–'+fmt12str(s.end)+(s.room?' · '+s.room:''))}">${esc(s.code)}<span class="t">${esc(fmt12str(s.start)+'–'+fmt12str(s.end))}</span>${showRoom?`<span class="r">${esc(s.room)}</span>`:''}</div>`;
+    }).join('');
+    return `<div class="mg-col">${blocks}</div>`;
+  }).join('');
+
+  return `<div class="mgrid" style="--rowh:${rowh}px;--bodyh:${bodyH}px">
+    <div class="mg-head"><div class="mg-gutter"></div>${DAYS.map(d=>`<div class="mg-day">${esc(L.days[d])}</div>`).join('')}</div>
+    <div class="mg-body"><div class="mg-gutter mg-axis">${axis}</div>${cols}</div>
+  </div>`;
+}
+
+function renderLegend(analysis){
+  const L = t();
+  return analysis.combo.map(pick=>{
+    const days = pick.section.sessions.map(s=>L.days[s.day]).join(L.daySep);
+    const instr = state.instrOverride[pick.section.rowIdx] ?? pick.section.instrGuess ?? '';
+    return `<div class="row">
+      <span class="sw" style="background:var(--${PALETTE[pick.colorIdx%PALETTE.length]})"></span>
+      <span class="code">${esc(pick.code)}</span><span>${esc(L.sec)} ${esc(pick.section.id)}</span>
+      <span class="rest">— ${esc(days)} — <span class="who">${esc(instr)}</span></span>
+    </div>`;
+  }).join('');
+}
+
+function renderCard(analysis, idx, DAYS){
+  const L = t();
+  const gapText = analysis.totalGap===0? L.gapFree : L.gapMin(analysis.totalGap);
+  const range = isFinite(analysis.earliest)
+    ? `<span class="pill range">${esc(fmt12(analysis.earliest))} → ${esc(fmt12(analysis.latest))}</span>` : '';
+  return `<div class="card">
+    <div class="card-head">
+      <span class="badge">${esc(L.badge(idx+1))}</span>
+      <div class="metrics">
+        <span class="pill">${esc(L.daysUsed(analysis.daysUsed))}</span>
+        <span class="pill ${analysis.totalGap===0?'good':''}">${esc(gapText)}</span>
+        ${range}
+        <button type="button" class="btn small card-pdf" data-idx="${idx}" title="${esc(L.exportNote)}">${esc(L.exportPdf)}</button>
+      </div>
+    </div>
+    <div class="legend">${renderLegend(analysis)}</div>
+    <div class="grid-wrap">${renderMiniGrid(analysis, DAYS)}</div>
+  </div>`;
+}
+
+function computeFiltered(){
+  if(activeCourses().length===0) return null;
+  const g = generateCombos();
+  const analyzed = g.combos.map(analyzeCombo).filter(a=>!a.conflict);
+  return {all:analyzed, filtered:sortResults(analyzed.filter(passesFilters)), truncated:g.truncated, skipped:g.skipped};
+}
+
+function renderResultsOnly(){
+  const L = t();
+  const data = computeFiltered();
+  const DAYS = dayLabelsPresent();
+  const results = document.getElementById('results');
+  const empty = document.getElementById('emptyState');
+  const loadWrap = document.getElementById('loadmoreWrap');
+  const exportAll = document.getElementById('exportAllBtn');
+  state.lastShown = [];
+  if(!data){
+    results.innerHTML=''; empty.classList.remove('hidden');
+    document.getElementById('emptyBig').textContent = L.optionEmpty;
+    document.getElementById('emptySub').textContent='';
+    renderWhy(null);
+    loadWrap.classList.add('hidden');
+    document.getElementById('summaryText').textContent = L.summary(0,0);
+    document.getElementById('showingText').textContent='';
+    exportAll.classList.add('hidden');
+    return;
+  }
+  let summary = L.summary(data.all.length, data.filtered.length);
+  if(data.truncated) summary += L.truncatedNote(MAX_COMBOS);
+  if(data.skipped.length) summary += L.skippedNote(data.skipped);
+  document.getElementById('summaryText').textContent = summary;
+
+  if(data.filtered.length===0){
+    results.innerHTML=''; empty.classList.remove('hidden');
+    document.getElementById('emptyBig').textContent = L.emptyBig;
+    document.getElementById('emptySub').textContent = L.emptySub;
+    renderWhy(explainEmpty(data.all));
+    loadWrap.classList.add('hidden');
+    document.getElementById('showingText').textContent='';
+    exportAll.classList.add('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  renderWhy(null);
+  const slice = data.filtered.slice(0, state.visible);
+  state.lastShown = slice;
+  results.innerHTML = slice.map((a,i)=>renderCard(a,i,DAYS)).join('');
+  document.getElementById('showingText').textContent = L.showing(slice.length, data.filtered.length);
+  loadWrap.classList.toggle('hidden', data.filtered.length<=slice.length);
+  const exportCount = Math.min(slice.length, MAX_EXPORT_PAGES);
+  exportAll.textContent = L.exportAll(exportCount);
+  exportAll.title = slice.length>MAX_EXPORT_PAGES ? L.exportCap(MAX_EXPORT_PAGES) : '';
+  exportAll.classList.remove('hidden');
+  results.querySelectorAll('.card-pdf').forEach(btn=>btn.addEventListener('click', e=>{
+    const i = Number(e.currentTarget.dataset.idx);
+    if(state.lastShown[i]) exportPdf([state.lastShown[i]], i+1);
+  }));
+}
+function render(){ renderResultsOnly(); }
+
+function renderWhy(info){
+  const box = document.getElementById('whyBox');
+  if(!info || !info.items.length){ box.classList.add('hidden'); box.innerHTML=''; return; }
+  /* the specific reason replaces the generic hint */
+  document.getElementById('emptySub').textContent = '';
+  box.innerHTML = `<div class="why-title">${esc(info.title)}</div><ul>${info.items.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
+  box.classList.remove('hidden');
+}
+
+document.getElementById('exportAllBtn').addEventListener('click', ()=>{
+  if(!state.lastShown.length) return;
+  exportPdf(state.lastShown.slice(0, MAX_EXPORT_PAGES), 1);
+});
+
+/* =========================================================================
+   PDF EXPORT — a real .pdf file written by hand, no external library.
+   Base-14 Helvetica only, so labels are romanised (Arabic can't be encoded
+   without embedding a font). Ctrl+P keeps the Arabic version.
+   ========================================================================= */
+function pdfText(s){
+  return String(s==null?'':s)
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^\x20-\x7E]/g,'')
+    .replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)');
+}
+function hexToRgb(hex){
+  const h = hex.replace('#','');
+  return [parseInt(h.slice(0,2),16)/255, parseInt(h.slice(2,4),16)/255, parseInt(h.slice(4,6),16)/255]
+    .map(v=>v.toFixed(3));
+}
+function pdfPageContent(analysis, optionNo, DAYS){
+  const W=842, H=595, M=34;
+  const out=[];
+  const Y = (top)=> (H-top).toFixed(2);
+  const rect=(x,top,w,h,hex)=>{ const [r,g,b]=hexToRgb(hex); out.push(`${r} ${g} ${b} rg ${x.toFixed(2)} ${Y(top+h)} ${w.toFixed(2)} ${h.toFixed(2)} re f`); };
+  const line=(x1,t1,x2,t2,hex,wdt)=>{ const [r,g,b]=hexToRgb(hex); out.push(`${r} ${g} ${b} RG ${(wdt||0.5).toFixed(2)} w ${x1.toFixed(2)} ${Y(t1)} m ${x2.toFixed(2)} ${Y(t2)} l S`); };
+  const text=(x,top,size,str,opt)=>{
+    const o=opt||{}; const [r,g,b]=hexToRgb(o.color||PDF_INK);
+    out.push(`BT /${o.bold?'F2':'F1'} ${size} Tf ${r} ${g} ${b} rg ${x.toFixed(2)} ${Y(top)} Td (${pdfText(str)}) Tj ET`);
+  };
+  const textRight=(x,top,size,str,opt)=>{
+    const w = pdfText(str).length * size * 0.5;
+    text(x-w, top, size, str, opt);
+  };
+
+  let top = M+12;
+  text(M, top, 15, 'Schedule option '+String(optionNo).padStart(2,'0'), {bold:true, color:PDF_INK});
+  top += 16;
+  const metaBits = [
+    state.meta.academicYear, state.meta.level, state.meta.specialization
+  ].filter(Boolean).join('  |  ');
+  if(metaBits){ text(M, top, 8.5, metaBits, {color:'#6B505C'}); top += 12; }
+  const gap = analysis.totalGap===0? 'no gaps' : analysis.totalGap+' min of gaps';
+  text(M, top, 9, analysis.daysUsed+' day(s) on campus  |  '+gap+'  |  '+fmt12(analysis.earliest)+' - '+fmt12(analysis.latest), {color:'#6B505C'});
+  top += 16;
+
+  /* legend — capped so a very long list can never squeeze the grid to nothing */
+  const LEGEND_H = 12.5, MIN_GRID = 120, headH = 14;
+  const gridFloor = H - M - 14;
+  const maxLines = Math.max(1, Math.floor((gridFloor - MIN_GRID - headH - top - 6) / LEGEND_H));
+  const shown = analysis.combo.length > maxLines ? analysis.combo.slice(0, maxLines-1) : analysis.combo;
+  shown.forEach(pick=>{
+    const days = pick.section.sessions.map(s=>T.en.days[s.day]).join(', ');
+    const instr = state.instrOverride[pick.section.rowIdx] ?? pick.section.instrGuess ?? '';
+    rect(M, top-6, 7, 7, PDF_COLORS[pick.colorIdx%PDF_COLORS.length]);
+    text(M+12, top, 9, `${pick.code}  Section ${pick.section.id}  -  ${days}  -  ${instr}`);
+    top += LEGEND_H;
+  });
+  if(shown.length < analysis.combo.length){
+    text(M+12, top, 9, `+ ${analysis.combo.length - shown.length} more course(s)`, {color:'#6B505C'});
+    top += LEGEND_H;
+  }
+  top += 6;
+
+  /* grid */
+  const {gStart, gEnd} = gridBounds(analysis);
+  const gutter = 46, gridLeft = M+gutter, gridRight = W-M;
+  const gridBottom = gridFloor;
+  const gridTop = Math.min(top + headH, gridBottom - MIN_GRID);
+  const span = Math.max(gEnd-gStart, 60);
+  const scale = (gridBottom-gridTop)/span;          /* px per minute */
+  const yOf = (min)=> gridTop + (min-gStart)*scale;
+  const colW = (gridRight-gridLeft)/DAYS.length;
+
+  DAYS.forEach((d,i)=>{
+    const cx = gridLeft + colW*i + colW/2;
+    const label = T.en.days[d];
+    text(cx - pdfText(label).length*8*0.28, top+8, 8.5, label, {color:'#6B505C', bold:true});
+  });
+  /* hour lines + labels */
+  for(let m=gStart; m<=gEnd; m+=60){
+    line(gridLeft, yOf(m), gridRight, yOf(m), '#E0D2D7', 0.5);
+    textRight(gridLeft-6, yOf(m)+2.6, 7.5, fmt12axis(m), {color:'#6B505C'});
+  }
+  /* column separators */
+  for(let i=0;i<=DAYS.length;i++){
+    const x = gridLeft + colW*i;
+    line(x, gridTop, x, gridBottom, '#E0D2D7', 0.5);
+  }
+  /* blocks */
+  DAYS.forEach((d,i)=>{
+    (analysis.byDay[d]||[]).forEach(s=>{
+      const y0 = yOf(toMin(s.start)), y1 = yOf(toMin(s.end));
+      const x = gridLeft + colW*i + 1.5;
+      rect(x, y0+0.7, colW-3, (y1-y0)-1.4, PDF_COLORS[s.colorIdx%PDF_COLORS.length]);
+      text(x+4, y0+10, 7.8, s.code, {bold:true, color:PDF_INK});
+      if(y1-y0 > 22) text(x+4, y0+19, 6.8, fmt12(toMin(s.start))+' - '+fmt12(toMin(s.end)), {color:PDF_INK});
+      if(y1-y0 > 32 && s.room) text(x+4, y0+27.5, 6.8, s.room, {color:PDF_INK});
+    });
+  });
+
+  text(M, H-M+4, 7, 'Generated with Schedule Builder by '+CREDITS.name+' - unofficial student tool, not affiliated with any University.', {color:'#9A8490'});
+  return out.join('\n');
+}
+
+function buildPdfFile(contents){
+  const W=842, H=595;
+  const offsets = {};
+  let out = '%PDF-1.4\n';
+  const put = (id, body)=>{ offsets[id] = out.length; out += id+' 0 obj\n'+body+'\nendobj\n'; };
+  const firstPageId = 5;
+  const pageIds = contents.map((_,i)=> firstPageId + i*2);
+  const contentIds = contents.map((_,i)=> firstPageId + i*2 + 1);
+
+  put(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  put(2, '<< /Type /Pages /Kids ['+pageIds.map(i=>i+' 0 R').join(' ')+'] /Count '+pageIds.length+' >>');
+  put(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+  put(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+  contents.forEach((c,i)=>{
+    put(pageIds[i], '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+W+' '+H+'] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents '+contentIds[i]+' 0 R >>');
+    put(contentIds[i], '<< /Length '+c.length+' >>\nstream\n'+c+'\nendstream');
+  });
+  const maxId = 4 + contents.length*2;
+  const xref = out.length;
+  out += 'xref\n0 '+(maxId+1)+'\n0000000000 65535 f \n';
+  for(let i=1;i<=maxId;i++) out += String(offsets[i]).padStart(10,'0')+' 00000 n \n';
+  out += 'trailer\n<< /Size '+(maxId+1)+' /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF';
+  return out;
+}
+
+function exportPdf(list, startNo){
+  try{
+    const DAYS = dayLabelsPresent();
+    const contents = list.map((a,i)=> pdfPageContent(a, (startNo||1)+i, DAYS));
+    const blob = new Blob([buildPdfFile(contents)], {type:'application/pdf'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = list.length>1 ? 'schedule-options.pdf' : 'schedule-option-'+String(startNo||1).padStart(2,'0')+'.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+  }catch(err){
+    console.error(err);
+    showError(t().parseError);
+  }
+}
+
+/* ================= LANGUAGE / STATIC TEXT ================= */
+function applyStaticText(){
+  const L = t();
+  const root = document.getElementById('htmlRoot');
+  root.lang = state.lang;
+  root.dir = state.lang==='ar'? 'rtl':'ltr';
+  document.title = L.title;
+  document.getElementById('hTitle').textContent = L.title;
+  document.getElementById('hSub').textContent = L.sub;
+  document.getElementById('langBtn').textContent = L.lang;
+  applyTheme();
+  document.getElementById('uTitle').textContent = L.uTitle;
+  document.getElementById('dzMain').textContent = L.dzMain;
+  document.getElementById('dzSub').textContent = L.dzSub;
+  document.getElementById('rTitle').textContent = L.rTitle;
+  document.getElementById('rHint').firstChild.textContent = L.rHint+' ';
+  document.getElementById('cTitle').textContent = L.cTitle;
+  document.getElementById('fTitle').textContent = L.fTitle;
+  document.getElementById('lblMinStart').textContent = L.lblMinStart;
+  document.getElementById('lblMaxEnd').textContent = L.lblMaxEnd;
+  document.getElementById('lblSort').textContent = L.lblSort;
+  document.getElementById('optCompact').textContent = L.optCompact;
+  document.getElementById('optDays').textContent = L.optDays;
+  document.getElementById('optEarly').textContent = L.optEarly;
+  document.getElementById('lblNoGaps').textContent = L.lblNoGaps;
+  document.getElementById('lblDaysOff').textContent = L.lblDaysOff;
+  document.getElementById('lblMaxDays').textContent = L.lblMaxDays;
+  document.getElementById('loadmoreBtn').textContent = L.loadMore;
+  document.getElementById('lblBlock').textContent = L.lblBlock;
+  document.getElementById('blockFromLbl').textContent = L.blockFrom;
+  document.getElementById('blockToLbl').textContent = L.blockTo;
+  document.getElementById('lblInstr').textContent = L.lblInstr;
+  document.getElementById('resetFiltersBtn').textContent = L.resetFilters;
+  document.getElementById('exportAllBtn').textContent = L.exportAll(Math.min(state.lastShown.length, MAX_EXPORT_PAGES));
+  document.getElementById('footNote').textContent = L.footNote;
+  document.getElementById('footCredits').innerHTML =
+    `${esc(L.credits)} <a href="${esc(CREDITS.repo)}" target="_blank" rel="noopener noreferrer">${esc(CREDITS.name)}</a>`;
+  document.getElementById('footDisclaimer').textContent = L.disclaimer;
+  const nb = document.getElementById('noticeBox');
+  if(state.notice){ state.notice = L.multiLevel; nb.textContent = state.notice; }
+  if(state.courses.length) updateReviewToggleUI();
+}
+
+function applyTheme(){
+  const root = document.getElementById('htmlRoot');
+  const L = t();
+  root.setAttribute('data-theme', state.theme);
+  const btn = document.getElementById('themeBtn');
+  /* the button names the mode you would switch to */
+  btn.textContent = state.theme==='dark' ? L.themeLight : L.themeDark;
+  btn.setAttribute('aria-pressed', state.theme==='dark' ? 'true' : 'false');
+}
+document.getElementById('themeBtn').addEventListener('click', ()=>{
+  state.theme = state.theme==='dark' ? 'light' : 'dark';
+  applyTheme();
+});
+
+document.getElementById('langBtn').addEventListener('click', ()=>{
+  state.lang = state.lang==='ar' ? 'en' : 'ar';
+  applyStaticText();
+  if(state.courses.length){
+    buildTimeSelects(); renderCourseManager(); buildDayFilters(); buildInstrFilters(); renderMeta(); renderReview(); render();
+  }
+});
+applyStaticText();
+</script>
+<!-- Cloudflare Web Analytics -->
+  <script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "041ba9f880b447b2989088c3823252de"}'></script>
+<!-- End Cloudflare Web Analytics -->
+</body>
+</html>
